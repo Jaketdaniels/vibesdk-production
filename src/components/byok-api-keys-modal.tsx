@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { Key, Check, AlertCircle, Loader2, Plus, Settings, Trash2, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -418,7 +419,118 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
                 <div className="text-center py-8 text-text-tertiary">
                   <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg font-medium mb-2">No API keys configured</p>
-                  <p className="text-sm">Add your first API key using the "Add Keys" tab</p>
+                  <p ="space-y-3">
+                  {managedSecrets.map((secret) => {
+                    const LogoComponent = secret.logo;
+                    return (
+                      <div
+                        key={secret.id}
+                        className="flex items-center gap-4 p-4 rounded-lg border hover:border-gray-300 transition-colors"
+                      >
+                        <div className="flex items-center justify-center w-8 h-8 bg-white rounded-md border shadow-sm">
+                          <LogoComponent className="h-5 w-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium">{secret.name}</span>
+                            <Badge
+                              variant={secret.isActive ? "default" : "secondary"}
+                              className="text-xs"
+                            >
+                              {secret.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                            <span className="font-mono">{secret.keyPreview}</span>
+                            <Separator orientation="vertical" className="h-3" />
+                            <span>Added {formatDate(secret.createdAt)}</span>
+                            {secret.lastUsed && (
+                              <>
+                                <Separator orientation="vertical" className="h-3" />
+                                <span>Last used {formatDate(secret.lastUsed)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor={`toggle-${secret.id}`} className="text-xs text-text-tertiary">
+                              {secret.isActive ? "Active" : "Inactive"}
+                            </Label>
+                            <Switch
+                              id={`toggle-${secret.id}`}
+                              checked={secret.isActive}
+                              onCheckedChange={() => handleToggleSecret(secret.id)}
+                              disabled={toggleLoadingId === secret.id}
+                            />
+                            {toggleLoadingId === secret.id && (
+                              <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openDeleteDialog(secret)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : (
-                <div className
+              )}
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter>
+            {activeTab === 'add' && selectedProvider && (
+              <div className="flex gap-2 justify-end w-full">
+                <Button variant="ghost" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSaveKey}
+                  disabled={!isKeyFormatValid || isSaving}
+                >
+                  {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Save Key
+                </Button>
+              </div>
+            )}
+            {activeTab === 'manage' && (
+              <Button variant="ghost" onClick={onClose} className="w-full sm:w-auto">
+                Close
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete API Key?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the {secretToDelete?.name} API key?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSecret}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
