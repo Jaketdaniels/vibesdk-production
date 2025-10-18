@@ -1,6 +1,15 @@
+// src/components/byok-api-keys-modal.tsx
 
 import { useState, useEffect } from 'react';
-import { Key, Check, AlertCircle, Loader2, Plus, Settings, Trash2, Eye } from 'lucide-react';
+import {
+  Key,
+  Check,
+  AlertCircle,
+  Loader2,
+  Plus,
+  Settings,
+  Trash2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,7 +38,8 @@ import {
 import { apiClient } from '@/lib/api-client';
 import { toast } from 'sonner';
 import type { SecretTemplate } from '@/api-types';
-// Import provider logos
+
+// Provider logos
 import OpenAILogo from '@/assets/provider-logos/openai.svg?react';
 import AnthropicLogo from '@/assets/provider-logos/anthropic.svg?react';
 import GoogleLogo from '@/assets/provider-logos/google.svg?react';
@@ -53,7 +63,6 @@ interface ManagedSecret {
   logo: React.ComponentType<{ className?: string }>;
 }
 
-// Logo mapping for dynamic provider support
 const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>> = {
   openai: OpenAILogo,
   anthropic: AnthropicLogo,
@@ -70,10 +79,10 @@ interface BYOKProvider {
   validation: RegExp;
 }
 
-// Convert BYOK template to provider configuration
 function templateToBYOKProvider(template: SecretTemplate): BYOKProvider {
-  const logo = PROVIDER_LOGOS[template.provider] || (() => <div className="w-4 h-4 bg-gray-300 rounded" />);
-
+  const logo =
+    PROVIDER_LOGOS[template.provider] ||
+    (() => <div className="w-4 h-4 bg-gray-300 rounded" />);
   return {
     id: template.id,
     name: template.displayName.replace(' (BYOK)', ''),
@@ -84,18 +93,18 @@ function templateToBYOKProvider(template: SecretTemplate): BYOKProvider {
   };
 }
 
-export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysModalProps) {
-  // Tab management
+export function ByokApiKeysModal({
+  isOpen,
+  onClose,
+  onKeyAdded,
+}: ByokApiKeysModalProps) {
   const [activeTab, setActiveTab] = useState<'add' | 'manage'>('add');
-
-  // Add keys tab state
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [byokProviders, setBYOKProviders] = useState<BYOKProvider[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Manage keys tab state
   const [managedSecrets, setManagedSecrets] = useState<ManagedSecret[]>([]);
   const [loadingSecrets, setLoadingSecrets] = useState(false);
   const [toggleLoadingId, setToggleLoadingId] = useState<string | null>(null);
@@ -103,197 +112,158 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
   const [secretToDelete, setSecretToDelete] = useState<ManagedSecret | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Get selected provider details
-  const provider = byokProviders.find(p => p.id === selectedProvider);
+  const provider = byokProviders.find((p) => p.id === selectedProvider);
 
-  // Load BYOK templates and existing secrets when modal opens
   useEffect(() => {
     if (isOpen) {
-      // Reset add keys tab
       setSelectedProvider(null);
       setApiKey('');
       setIsSaving(false);
-
-      // Reset manage keys tab
       setToggleLoadingId(null);
       setDeleteDialogOpen(false);
       setSecretToDelete(null);
       setIsDeleting(false);
-
-      // Load data
       loadBYOKProviders();
       loadManagedSecrets();
     }
   }, [isOpen]);
 
-  const loadBYOKProviders = async () => {
+  async function loadBYOKProviders() {
     try {
       setIsLoading(true);
-      const response = await apiClient.getBYOKTemplates();
-
-      if (response.success && response.data) {
-        const providers = response.data.templates.map(templateToBYOKProvider);
+      const res = await apiClient.getBYOKTemplates();
+      if (res.success && res.data) {
+        const providers = res.data.templates.map(templateToBYOKProvider);
         setBYOKProviders(providers);
       } else {
         toast.error('Failed to load BYOK providers');
       }
-    } catch (error) {
-      console.error('Error loading BYOK templates:', error);
+    } catch {
       toast.error('Failed to load BYOK providers');
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
-  const loadManagedSecrets = async () => {
+  async function loadManagedSecrets() {
     try {
       setLoadingSecrets(true);
-      const response = await apiClient.getAllSecrets();
-
-      if (response.success && response.data) {
-        // Filter BYOK secrets only (show both active and inactive for management)
-        const byokSecrets = response.data.secrets.filter(secret =>
-          secret.secretType.endsWith('_BYOK')
+      const res = await apiClient.getAllSecrets();
+      if (res.success && res.data) {
+        const byok = res.data.secrets.filter((s) =>
+          s.secretType.endsWith('_BYOK')
         );
-
-        // Convert to ManagedSecret format with logos
-        const managedSecrets: ManagedSecret[] = byokSecrets.map(secret => {
-          const logo = PROVIDER_LOGOS[secret.provider] || (() => <div className="w-4 h-4 bg-gray-300 rounded" />);
-
-          return {
-            id: secret.id,
-            name: secret.name,
-            provider: secret.provider,
-            keyPreview: secret.keyPreview,
-            isActive: secret.isActive ?? false,
-            lastUsed: secret.lastUsed ? secret.lastUsed.toString() : null,
-            createdAt: secret.createdAt?.toString() ?? '',
-            logo
-          };
-        });
-
-        setManagedSecrets(managedSecrets);
+        const list: ManagedSecret[] = byok.map((s) => ({
+          id: s.id,
+          name: s.name,
+          provider: s.provider,
+          keyPreview: s.keyPreview,
+          isActive: s.isActive ?? false,
+          lastUsed: s.lastUsed ? s.lastUsed.toString() : null,
+          createdAt: s.createdAt?.toString() ?? '',
+          logo:
+            PROVIDER_LOGOS[s.provider] ||
+            (() => <div className="w-4 h-4 bg-gray-300 rounded" />),
+        }));
+        setManagedSecrets(list);
       } else {
         toast.error('Failed to load managed secrets');
       }
-    } catch (error) {
-      console.error('Error loading managed secrets:', error);
+    } catch {
       toast.error('Failed to load managed secrets');
     } finally {
       setLoadingSecrets(false);
     }
-  };
+  }
 
-  // Handle provider selection
-  const handleProviderSelect = (providerId: string) => {
-    setSelectedProvider(providerId);
+  const handleProviderSelect = (id: string) => {
+    setSelectedProvider(id);
     setApiKey('');
   };
 
-  // Validate key format
-  const isKeyFormatValid = !!(provider && apiKey && provider.validation.test(apiKey));
+  const isKeyFormatValid = !!(
+    provider &&
+    apiKey &&
+    provider.validation.test(apiKey)
+  );
 
-  // Save API key
-  const handleSaveKey = async () => {
+  async function handleSaveKey() {
     if (!provider || !apiKey || !isKeyFormatValid) return;
     setIsSaving(true);
     try {
       await apiClient.storeSecret({
         templateId: provider.id,
         value: apiKey.trim(),
-        environment: 'production'
+        environment: 'production',
       });
       toast.success(`${provider.name} API key added successfully!`);
       onKeyAdded?.();
-
-      // Reload managed secrets and switch to manage tab
       await loadManagedSecrets();
       setActiveTab('manage');
-
-      // Reset add form
       setSelectedProvider(null);
       setApiKey('');
-    } catch (error) {
-      console.error('Failed to save API key:', error);
+    } catch {
       toast.error('Failed to save API key. Please try again.');
     } finally {
       setIsSaving(false);
     }
-  };
+  }
 
-  // Toggle secret active status
-  const handleToggleSecret = async (secretId: string) => {
-    setToggleLoadingId(secretId);
-
+  async function handleToggleSecret(id: string) {
+    setToggleLoadingId(id);
     try {
-      const response = await apiClient.toggleSecret(secretId);
-
-      if (response.success && response.data) {
-        const updatedSecret = response.data.secret;
-        toast.success(response.data.message);
-
-        // Update local state
-        setManagedSecrets(prev =>
-          prev.map(secret =>
-            secret.id === secretId
-              ? { ...secret, isActive: updatedSecret.isActive ?? false }
-              : secret
+      const res = await apiClient.toggleSecret(id);
+      if (res.success && res.data) {
+        toast.success(res.data.message);
+        setManagedSecrets((prev) =>
+          prev.map((s) =>
+            s.id === id
+              ? { ...s, isActive: res.data.secret.isActive ?? false }
+              : s
           )
         );
-
-        // Notify parent about key changes
         onKeyAdded?.();
       } else {
         toast.error('Failed to toggle secret status');
       }
-    } catch (error) {
-      console.error('Error toggling secret:', error);
+    } catch {
       toast.error('Failed to toggle secret status');
     } finally {
       setToggleLoadingId(null);
     }
-  };
-
-  // Delete secret
-  const handleDeleteSecret = async () => {
-    if (!secretToDelete) return;
-
-    setIsDeleting(true);
-
-    try {
-      await apiClient.deleteSecret(secretToDelete.id);
-      toast.success(`${secretToDelete.name} API key deleted successfully`);
-
-      // Remove from local state
-      setManagedSecrets(prev => prev.filter(secret => secret.id !== secretToDelete.id));
-
-      // Notify parent about key changes
-      onKeyAdded?.();
-
-      // Close dialog
-      setDeleteDialogOpen(false);
-      setSecretToDelete(null);
-    } catch (error) {
-      console.error('Error deleting secret:', error);
-      toast.error('Failed to delete API key');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
+  }
 
   const openDeleteDialog = (secret: ManagedSecret) => {
     setSecretToDelete(secret);
     setDeleteDialogOpen(true);
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+  async function handleDeleteSecret() {
+    if (!secretToDelete) return;
+    setIsDeleting(true);
+    try {
+      await apiClient.deleteSecret(secretToDelete.id);
+      toast.success(`${secretToDelete.name} API key deleted successfully`);
+      setManagedSecrets((prev) =>
+        prev.filter((s) => s.id !== secretToDelete.id)
+      );
+      onKeyAdded?.();
+      setDeleteDialogOpen(false);
+      setSecretToDelete(null);
+    } catch {
+      toast.error('Failed to delete API key');
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  function formatDate(str: string) {
+    return new Date(str).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
     });
-  };
+  }
 
   return (
     <>
@@ -301,38 +271,43 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5" />
-              Bring Your Own Key
+              <Key className="h-5 w-5" /> Bring Your Own Key{' '}
               <span className="flex items-center gap-1 text-xs text-text-tertiary font-normal">
                 via <CloudflareLogo className="h-3 w-3" /> AI Gateway
               </span>
             </DialogTitle>
             <DialogDescription>
-              Add your API keys to use your own provider accounts for billing, or manage existing keys
+              Add your API keys to use your own provider accounts for billing,
+              or manage existing keys
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'add' | 'manage')} className="space-y-6">
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as 'add' | 'manage')}
+            className="space-y-6"
+          >
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="add" className="flex items-center gap-2">
-                <Plus className="h-4 w-4" />
-                Add Keys
+                <Plus className="h-4 w-4" /> Add Keys
               </TabsTrigger>
               <TabsTrigger value="manage" className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Manage Keys
+                <Settings className="h-4 w-4" /> Manage Keys
               </TabsTrigger>
             </TabsList>
 
-            {/* Add Keys Tab */}
             <TabsContent value="add" className="space-y-6">
-              {/* Provider Selection - Clean List */}
               <div className="space-y-3">
-                <Label className="text-sm font-medium">Select Provider</Label>
+                <Label className="text-sm font-medium">
+                  Select Provider
+                </Label>
                 {isLoading ? (
                   <div className="space-y-2">
                     {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-gray-200">
+                      <div
+                        key={i}
+                        className="w-full flex items-center gap-3 p-3 rounded-lg border-2 border-gray-200"
+                      >
                         <div className="w-8 h-8 bg-gray-200 rounded-md animate-pulse" />
                         <div className="h-4 bg-gray-200 rounded animate-pulse flex-1" />
                       </div>
@@ -340,21 +315,23 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {byokProviders.map((providerOption) => {
-                      const LogoComponent = providerOption.logo;
-                      const isSelected = selectedProvider === providerOption.id;
+                    {byokProviders.map((opt) => {
+                      const Logo = opt.logo;
+                      const sel = selectedProvider === opt.id;
                       return (
                         <button
-                          key={providerOption.id}
-                          onClick={() => handleProviderSelect(providerOption.id)}
+                          key={opt.id}
+                          onClick={() => handleProviderSelect(opt.id)}
                           className={`w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all duration-200 text-left ${
-                            isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                            sel
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                           }`}
                         >
                           <div className="flex items-center justify-center w-8 h-8 bg-white rounded-md border shadow-sm">
-                            <LogoComponent className="h-5 w-5" />
+                            <Logo className="h-5 w-5" />
                           </div>
-                          <span className="font-medium">{providerOption.name}</span>
+                          <span className="font-medium">{opt.name}</span>
                         </button>
                       );
                     })}
@@ -362,7 +339,6 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
                 )}
               </div>
 
-              {/* API Key Input - Smooth Expansion */}
               {selectedProvider && provider && (
                 <div className="space-y-3 animate-in slide-in-from-top-2 duration-300">
                   <Label htmlFor="apiKey" className="text-sm font-medium">
@@ -394,18 +370,22 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
                     )}
                   </div>
                   {apiKey && !isKeyFormatValid && (
-                    <p className="text-xs text-red-600">Invalid format. Expected: {provider.placeholder}</p>
+                    <p className="text-xs text-red-600">
+                      Invalid format. Expected: {provider.placeholder}
+                    </p>
                   )}
                 </div>
               )}
             </TabsContent>
 
-            {/* Manage Keys Tab */}
             <TabsContent value="manage" className="space-y-4">
               {loadingSecrets ? (
                 <div className="space-y-4">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex items-center gap-4 p-4 rounded-lg border">
+                    <div
+                      key={i}
+                      className="flex items-center gap-4 p-4 rounded-lg border"
+                    >
                       <div className="w-8 h-8 bg-gray-200 rounded-md animate-pulse" />
                       <div className="flex-1 space-y-2">
                         <div className="h-4 bg-gray-200 rounded animate-pulse w-1/3" />
@@ -418,8 +398,15 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
               ) : managedSecrets.length === 0 ? (
                 <div className="text-center py-8 text-text-tertiary">
                   <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg font-medium mb-2">No API keys configured</p>
-                  <p ="space-y-3">
+                  <p className="text-lg font-medium mb-2">
+                    No API keys configured
+                  </p>
+                  <p className="text-sm">
+                    Add your first API key using the "Add Keys" tab
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
                   {managedSecrets.map((secret) => {
                     const LogoComponent = secret.logo;
                     return (
@@ -434,33 +421,42 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium">{secret.name}</span>
                             <Badge
-                              variant={secret.isActive ? "default" : "secondary"}
+                              variant={secret.isActive ? 'default' : 'secondary'}
                               className="text-xs"
                             >
-                              {secret.isActive ? "Active" : "Inactive"}
+                              {secret.isActive ? 'Active' : 'Inactive'}
                             </Badge>
                           </div>
                           <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                            <span className="font-mono">{secret.keyPreview}</span>
+                            <span className="font-mono">
+                              {secret.keyPreview}
+                            </span>
                             <Separator orientation="vertical" className="h-3" />
                             <span>Added {formatDate(secret.createdAt)}</span>
                             {secret.lastUsed && (
                               <>
                                 <Separator orientation="vertical" className="h-3" />
-                                <span>Last used {formatDate(secret.lastUsed)}</span>
+                                <span>
+                                  Last used {formatDate(secret.lastUsed)}
+                                </span>
                               </>
                             )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-2">
-                            <Label htmlFor={`toggle-${secret.id}`} className="text-xs text-text-tertiary">
-                              {secret.isActive ? "Active" : "Inactive"}
+                            <Label
+                              htmlFor={`toggle-${secret.id}`}
+                              className="text-xs text-text-tertiary"
+                            >
+                              {secret.isActive ? 'Active' : 'Inactive'}
                             </Label>
                             <Switch
                               id={`toggle-${secret.id}`}
                               checked={secret.isActive}
-                              onCheckedChange={() => handleToggleSecret(secret.id)}
+                              onCheckedChange={() =>
+                                handleToggleSecret(secret.id)
+                              }
                               disabled={toggleLoadingId === secret.id}
                             />
                             {toggleLoadingId === secret.id && (
@@ -508,7 +504,6 @@ export function ByokApiKeysModal({ isOpen, onClose, onKeyAdded }: ByokApiKeysMod
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
