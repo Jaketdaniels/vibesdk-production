@@ -160,6 +160,34 @@ export function getTemplatesData(): SecretTemplate[] {
 			required: false,
 			category: 'byok',
 		},
+		{
+			id: 'OPENROUTER_API_KEY_BYOK',
+			displayName: 'OpenRouter (BYOK)',
+			envVarName: 'OPENROUTER_API_KEY_BYOK',
+			provider: 'openrouter',
+			icon: '🔀',
+			description:
+				'Use your OpenRouter API key to access multiple AI models via a unified API',
+			instructions: 'Go to OpenRouter → Keys → Create new key',
+			placeholder: 'sk-or-v1-...',
+			validation: '^sk-or-.{10,}$',
+			required: false,
+			category: 'byok',
+		},
+		{
+			id: 'OLLAMA_ENDPOINT_BYOK',
+			displayName: 'Ollama (BYOK)',
+			envVarName: 'OLLAMA_ENDPOINT_BYOK',
+			provider: 'ollama',
+			icon: '🦙',
+			description:
+				'Use your local Ollama server endpoint for running LLMs locally',
+			instructions: 'Enter your Ollama server URL (e.g., http://localhost:11434)',
+			placeholder: 'http://localhost:11434',
+			validation: '^https?://.{3,}$',
+			required: false,
+			category: 'byok',
+		},
 
 		// Development Tools
 		{

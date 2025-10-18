@@ -45,6 +45,8 @@ import AnthropicLogo from '@/assets/provider-logos/anthropic.svg?react';
 import GoogleLogo from '@/assets/provider-logos/google.svg?react';
 import CerebrasLogo from '@/assets/provider-logos/cerebras.svg?react';
 import CloudflareLogo from '@/assets/provider-logos/cloudflare.svg?react';
+import OpenRouterLogo from '@/assets/provider-logos/openrouter.svg?react';
+import OllamaLogo from '@/assets/provider-logos/ollama.svg?react';
 
 interface ByokApiKeysModalProps {
   isOpen: boolean;
@@ -68,6 +70,8 @@ const PROVIDER_LOGOS: Record<string, React.ComponentType<{ className?: string }>
   anthropic: AnthropicLogo,
   'google-ai-studio': GoogleLogo,
   cerebras: CerebrasLogo,
+  openrouter: OpenRouterLogo,
+  ollama: OllamaLogo,
 };
 
 interface BYOKProvider {

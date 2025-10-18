@@ -16,7 +16,7 @@ import {
 import { Message, MessageContent, MessageRole } from './common';
 import { ToolCallResult, ToolDefinition } from '../tools/types';
 import { AgentActionKey, AIModels, InferenceMetadata } from './config.types';
-// import { SecretsService } from '../../database';
+import { SecretsService } from '../../database/services/SecretsService';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { getUserConfigurableSettings } from '../../config';
 import { SecurityError, RateLimitExceededError } from 'shared/types/errors';
@@ -224,27 +224,27 @@ function isValidApiKey(apiKey: string): boolean {
     return true;
 }
 
-async function getApiKey(provider: string, env: Env, _userId: string): Promise<string> {
+async function getApiKey(provider: string, env: Env, userId: string): Promise<string> {
     console.log("Getting API key for provider: ", provider);
-    // try {
-    //     const secretsService = new SecretsService(env);
-    //     const userProviderKeys = await secretsService.getUserBYOKKeysMap(userId);
-    //     // First check if user has a custom API key for this provider
-    //     if (userProviderKeys && provider in userProviderKeys) {
-    //         const userKey = userProviderKeys.get(provider);
-    //         if (userKey && isValidApiKey(userKey)) {
-    //             console.log("Found user API key for provider: ", provider, userKey);
-    //             return userKey;
-    //         }
-    //     }
-    // } catch (error) {
-    //     console.error("Error getting API key for provider: ", provider, error);
-    // }
+    try {
+        const secretsService = new SecretsService(env);
+        const userProviderKeys = await secretsService.getUserBYOKKeysMap(userId);
+        // First check if user has a custom API key for this provider
+        if (userProviderKeys && userProviderKeys.has(provider)) {
+            const userKey = userProviderKeys.get(provider);
+            if (userKey && isValidApiKey(userKey)) {
+                console.log("Found user API key for provider: ", provider);
+                return userKey;
+            }
+        }
+    } catch (error) {
+        console.error("Error getting API key for provider: ", provider, error);
+    }
     // Fallback to environment variables
     const providerKeyString = provider.toUpperCase().replaceAll('-', '_');
     const envKey = `${providerKeyString}_API_KEY` as keyof Env;
     let apiKey: string = env[envKey] as string;
-    
+
     // Check if apiKey is empty or undefined and is valid
     if (!isValidApiKey(apiKey)) {
         apiKey = env.CLOUDFLARE_AI_GATEWAY_TOKEN;
@@ -267,9 +267,16 @@ export async function getConfigurationForModel(
     if (match) {
         const provider = match[1];
         if (provider === 'openrouter') {
+            const apiKey = await getApiKey('openrouter', env, userId);
             return {
                 baseURL: 'https://openrouter.ai/api/v1',
-                apiKey: env.OPENROUTER_API_KEY,
+                apiKey: apiKey,
+            };
+        } else if (provider === 'ollama') {
+            const endpoint = await getApiKey('ollama', env, userId);
+            return {
+                baseURL: endpoint || 'http://localhost:11434/v1',
+                apiKey: 'ollama',
             };
         } else if (provider === 'gemini') {
             return {
