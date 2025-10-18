@@ -891,7 +891,6 @@ export default function SettingsPage() {
 										size="sm"
 										variant="outline"
 										onClick={() => setByokModalOpen(true)}
-                                        enabled
 										className="gap-2"
 									>
 										<Key className="h-4 w-4" />

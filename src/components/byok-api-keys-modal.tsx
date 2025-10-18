@@ -103,6 +103,7 @@ export function ByokApiKeysModal({
   const [apiKey, setApiKey] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [byokProviders, setBYOKProviders] = useState<BYOKProvider[]>([]);
+  const [byokTemplates, setBYOKTemplates] = useState<SecretTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [managedSecrets, setManagedSecrets] = useState<ManagedSecret[]>([]);
@@ -123,16 +124,21 @@ export function ByokApiKeysModal({
       setDeleteDialogOpen(false);
       setSecretToDelete(null);
       setIsDeleting(false);
-      loadBYOKProviders();
-      loadManagedSecrets();
+      loadData();
     }
   }, [isOpen]);
+
+  async function loadData() {
+    await loadBYOKProviders();
+    await loadManagedSecrets();
+  }
 
   async function loadBYOKProviders() {
     try {
       setIsLoading(true);
       const res = await apiClient.getBYOKTemplates();
       if (res.success && res.data?.templates) {
+        setBYOKTemplates(res.data.templates);
         const providers = res.data.templates.map(templateToBYOKProvider);
         setBYOKProviders(providers);
       } else {
@@ -154,7 +160,7 @@ export function ByokApiKeysModal({
           s.secretType.endsWith('_BYOK')
         );
         const managed = byok.map((s) => {
-          const template = getBYOKTemplates().find(t => t.envVarName === s.secretType);
+          const template = byokTemplates.find((t: SecretTemplate) => t.envVarName === s.secretType);
           const logo = template ? PROVIDER_LOGOS[template.provider] : () => <div className="w-4 h-4 bg-gray-300 rounded" />;
           return {
             id: s.id,
@@ -162,8 +168,8 @@ export function ByokApiKeysModal({
             provider: s.provider,
             keyPreview: s.keyPreview,
             isActive: s.isActive ?? false,
-            lastUsed: s.lastUsed,
-            createdAt: s.createdAt.toString(),
+            lastUsed: s.lastUsed ? s.lastUsed.toString() : null,
+            createdAt: s.createdAt ? s.createdAt.toString() : '',
             logo,
           };
         });
@@ -221,7 +227,7 @@ export function ByokApiKeysModal({
         setManagedSecrets((prev) =>
           prev.map((s) =>
             s.id === id
-              ? { ...s, isActive: res.data.secret.isActive ?? false }
+              ? { ...s, isActive: res.data?.secret.isActive ?? false }
               : s
           )
         );
