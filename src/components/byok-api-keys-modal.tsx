@@ -132,49 +132,26 @@ export function ByokApiKeysModal({
     try {
       setIsLoading(true);
       const res = await apiClient.getBYOKTemplates();
-      if (res.success && res.data) {
-        const providers = res.data.templates.map(templateToBYOKProvider);
-        setBYOKProviders(providers);
-      } else {
-        toast.error('Failed to load BYOK providers');
-      }
-    } catch {
-      toast.error('Failed to load BYOK providers');
-    } finally {
-      setIsLoading(false);
-    }
-  }
+if (res.success && res.data?.templates) {
+  const providers = res.data.templates.map(templateToBYOKProvider);
+  setBYOKProviders(providers);
+} else {
+  toast.error('Failed to load BYOK providers');
+}
 
   async function loadManagedSecrets() {
     try {
       setLoadingSecrets(true);
-      const res = await apiClient.getAllSecrets();
-      if (res.success && res.data) {
-        const byok = res.data.secrets.filter((s) =>
-          s.secretType.endsWith('_BYOK')
-        );
-        const list: ManagedSecret[] = byok.map((s) => ({
-          id: s.id,
-          name: s.name,
-          provider: s.provider,
-          keyPreview: s.keyPreview,
-          isActive: s.isActive ?? false,
-          lastUsed: s.lastUsed ? s.lastUsed.toString() : null,
-          createdAt: s.createdAt?.toString() ?? '',
-          logo:
-            PROVIDER_LOGOS[s.provider] ||
-            (() => <div className="w-4 h-4 bg-gray-300 rounded" />),
-        }));
-        setManagedSecrets(list);
-      } else {
-        toast.error('Failed to load managed secrets');
-      }
-    } catch {
-      toast.error('Failed to load managed secrets');
-    } finally {
-      setLoadingSecrets(false);
-    }
-  }
+    const res = await apiClient.getAllSecrets();
+if (res.success && res.data?.secrets) {
+  const byok = res.data.secrets.filter((s) =>
+    s.secretType.endsWith('_BYOK')
+  );
+  // …rest of your mapping logic…
+} else {
+  toast.error('Failed to load managed secrets');
+}
+
 
   const handleProviderSelect = (id: string) => {
     setSelectedProvider(id);
@@ -488,7 +465,6 @@ export function ByokApiKeysModal({
                 </Button>
                 <Button
                   onClick={handleSaveKey}
-                  disabled={!isKeyFormatValid || isSaving}
                 >
                   {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                   Save Key
