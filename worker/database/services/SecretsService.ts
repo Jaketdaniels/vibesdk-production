@@ -9,7 +9,6 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { getBYOKTemplates } from '../../types/secretsTemplates';
 import { generateId } from '../../utils/generateId';
 import type { SecretData, EncryptedSecret } from '../types';
-import generateId from '../../utils/generateId';
 
 export class SecretsService extends BaseService {
     /**

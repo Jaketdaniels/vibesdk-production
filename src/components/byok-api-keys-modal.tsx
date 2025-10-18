@@ -132,25 +132,51 @@ export function ByokApiKeysModal({
     try {
       setIsLoading(true);
       const res = await apiClient.getBYOKTemplates();
-if (res.success && res.data?.templates) {
-  const providers = res.data.templates.map(templateToBYOKProvider);
-  setBYOKProviders(providers);
-} else {
-  toast.error('Failed to load BYOK providers');
-}
+      if (res.success && res.data?.templates) {
+        const providers = res.data.templates.map(templateToBYOKProvider);
+        setBYOKProviders(providers);
+      } else {
+        toast.error('Failed to load BYOK providers');
+      }
+    } catch (error) {
+      toast.error('Failed to load BYOK providers');
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   async function loadManagedSecrets() {
     try {
       setLoadingSecrets(true);
-    const res = await apiClient.getAllSecrets();
-if (res.success && res.data?.secrets) {
-  const byok = res.data.secrets.filter((s) =>
-    s.secretType.endsWith('_BYOK')
-  );
-  // …rest of your mapping logic…
-} else {
-  toast.error('Failed to load managed secrets');
-}
+      const res = await apiClient.getAllSecrets();
+      if (res.success && res.data?.secrets) {
+        const byok = res.data.secrets.filter((s) =>
+          s.secretType.endsWith('_BYOK')
+        );
+        const managed = byok.map((s) => {
+          const template = getBYOKTemplates().find(t => t.envVarName === s.secretType);
+          const logo = template ? PROVIDER_LOGOS[template.provider] : () => <div className="w-4 h-4 bg-gray-300 rounded" />;
+          return {
+            id: s.id,
+            name: s.name,
+            provider: s.provider,
+            keyPreview: s.keyPreview,
+            isActive: s.isActive ?? false,
+            lastUsed: s.lastUsed,
+            createdAt: s.createdAt.toString(),
+            logo,
+          };
+        });
+        setManagedSecrets(managed);
+      } else {
+        toast.error('Failed to load managed secrets');
+      }
+    } catch (error) {
+      toast.error('Failed to load managed secrets');
+    } finally {
+      setLoadingSecrets(false);
+    }
+  }
 
 
   const handleProviderSelect = (id: string) => {
