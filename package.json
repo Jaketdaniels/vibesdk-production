@@ -6,6 +6,7 @@
 	"scripts": {
 		"setup": "tsx scripts/setup.ts",
 		"dev": "DEV_MODE=true vite",
+		"prebuild": "rm -rf node_modules/.tmp/*.tsbuildinfo",
 		"build": "tsc -b --incremental && vite build",
 		"lint": "eslint .",
 		"preview": "npm run build && vite preview",
