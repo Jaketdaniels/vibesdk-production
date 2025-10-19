@@ -3,6 +3,9 @@ import { createBrowserRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { initSentry } from './utils/sentry';
 
+// Import passkey API client extensions
+import './lib/api-client.passkeys';
+
 import { routes } from './routes.ts';
 import './index.css';
 
