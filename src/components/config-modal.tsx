@@ -24,10 +24,11 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { apiClient } from '@/lib/api-client';
 import { ByokApiKeysModal } from './byok-api-keys-modal';
-import type { 
-  ModelConfig, 
-  UserModelConfigWithMetadata, 
-  ModelConfigUpdate, 
+import { toast } from 'sonner';
+import type {
+  ModelConfig,
+  UserModelConfigWithMetadata,
+  ModelConfigUpdate,
   AIModels,
   ByokProvidersData
 } from '@/api-types';
@@ -274,9 +275,14 @@ export function ConfigModal({
     setByokModalOpen(true);
   };
 
-  const handleByokKeyAdded = () => {
-    // Refresh BYOK data after a key is added
-    loadByokData();
+  const handleByokKeyAdded = async () => {
+    // Immediately refresh BYOK data
+    await loadByokData();
+
+    // Force re-render to update available models
+    setFormData(prev => ({ ...prev }));
+
+    toast.success('Model list updated - new providers available!');
   };
 
   const isUserOverride = userConfig?.isUserOverride || false;

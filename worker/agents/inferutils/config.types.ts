@@ -37,8 +37,16 @@ export enum AIModels {
     OPENAI_5_MINI = 'openai/gpt-5-mini',
     OPENAI_OSS = 'openai/gpt-oss-120b',
 
-    // OPENROUTER_QWEN_3_CODER = '[openrouter]qwen/qwen3-coder',
-    // OPENROUTER_KIMI_2_5 = '[openrouter]moonshotai/kimi-k2',
+    // OpenRouter - Router to 200+ models from multiple providers
+    OPENROUTER_ANTHROPIC_CLAUDE_35_SONNET = 'openrouter/anthropic/claude-3.5-sonnet',
+    OPENROUTER_ANTHROPIC_CLAUDE_37_SONNET = 'openrouter/anthropic/claude-3-7-sonnet-20250219',
+    OPENROUTER_OPENAI_GPT4O = 'openrouter/openai/gpt-4o',
+    OPENROUTER_OPENAI_O1 = 'openrouter/openai/o1',
+    OPENROUTER_GOOGLE_GEMINI_2_FLASH = 'openrouter/google/gemini-2.0-flash-exp',
+    OPENROUTER_META_LLAMA_33_70B = 'openrouter/meta-llama/llama-3.3-70b-instruct',
+    OPENROUTER_QWEN_3_CODER = 'openrouter/qwen/qwq-32b-preview',
+    OPENROUTER_DEEPSEEK_V3 = 'openrouter/deepseek/deepseek-chat',
+    OPENROUTER_MISTRAL_LARGE = 'openrouter/mistralai/mistral-large-2411',
 
     // Cerebras models
     CEREBRAS_GPT_OSS = 'cerebras/gpt-oss-120b',

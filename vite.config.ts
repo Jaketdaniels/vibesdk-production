@@ -16,8 +16,6 @@ export default defineConfig({
 		force: true, // Force re-optimization on every start
 		// Override deprecated esbuildOptions from plugins with rollupOptions
 		rollupOptions: {},
-		// @ts-expect-error - Explicitly set to undefined to suppress plugin warnings
-		esbuildOptions: undefined,
 	},
 
 	// build: {

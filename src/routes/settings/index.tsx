@@ -627,40 +627,6 @@ export default function SettingsPage() {
 							</div>
 						</CardHeader>
 						<CardContent className="space-y-6 px-6">
-							{/* Provider API Keys Integration */}
-							<div className="space-y-2 mt-6">
-								<h4 className="font-medium">
-									Provider API Keys
-								</h4>
-								<p className="text-sm text-text-tertiary">
-									AI provider API keys are managed in the "API
-									Keys & Secrets" section below. Configure
-									your OpenAI, Anthropic, Google AI, and
-									OpenRouter keys there.
-								</p>
-
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => {
-										const secretsSection =
-											document.getElementById('secrets');
-										if (secretsSection) {
-											secretsSection.scrollIntoView({
-												behavior: 'smooth',
-												block: 'start',
-											});
-										}
-									}}
-									className="gap-2 shrink-0"
-								>
-									<Key className="h-4 w-4" />
-									Manage Keys
-								</Button>
-							</div>
-
-							<Separator />
-
 							{/* Model Configuration Tabs */}
 							<ModelConfigTabs
 								agentConfigs={agentConfigs}

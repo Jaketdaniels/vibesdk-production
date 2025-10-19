@@ -60,6 +60,14 @@ export async function getUserProviderStatus(
 }
 
 /**
+ * Identify provider type: router (like OpenRouter) vs direct provider
+ */
+export function getProviderType(provider: string): 'direct' | 'router' {
+	const routers = ['openrouter']; // Providers that route to multiple other providers
+	return routers.includes(provider) ? 'router' : 'direct';
+}
+
+/**
  * Get models available for BYOK providers that user has keys for
  */
 export function getByokModels(
