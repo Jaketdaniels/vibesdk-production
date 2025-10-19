@@ -2,59 +2,71 @@
  * For more details on how to configure Wrangler, refer to:
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  */
- {
+{
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "vibesdk-production",
 	"main": "worker/index.ts",
 	"compatibility_date": "2025-08-10",
-	"compatibility_flags": ["nodejs_compat"],
-    "version_metadata": {
-        "binding": "CF_VERSION_METADATA"
-    },
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
 	"assets": {
 		"directory": "dist",
 		"not_found_handling": "single-page-application",
-        "run_worker_first": true,
-        "binding": "ASSETS"
+		"run_worker_first": true,
+		"binding": "ASSETS"
 	},
 	"observability": {
 		"enabled": true,
-        "head_sampling_rate": 1,
+		"head_sampling_rate": 1,
 	},
-    "unsafe": {
-        "bindings": [
-            {
-                "name": "API_RATE_LIMITER",
-                "type": "ratelimit",
-                "namespace_id": "2101",
-                "simple": { "limit": 10000, "period": 60 }
-            },
-            {
-                "name": "AUTH_RATE_LIMITER",
-                "type": "ratelimit",
-                "namespace_id": "2102",
-                "simple": { "limit": 1000, "period": 60 }
-            }
-        ]
-    },
+	"unsafe": {
+		"bindings": [
+			{
+				"name": "API_RATE_LIMITER",
+				"type": "ratelimit",
+				"namespace_id": "2101",
+				"simple": {
+					"limit": 10000,
+					"period": 60
+				}
+			},
+			{
+				"name": "AUTH_RATE_LIMITER",
+				"type": "ratelimit",
+				"namespace_id": "2102",
+				"simple": {
+					"limit": 1000,
+					"period": 60
+				}
+			}
+		]
+	},
 	"ai": {
 		"binding": "AI",
-        "remote": true
+		"remote": true
 	},
-    "dispatch_namespaces": [
-        {
-            "binding": "DISPATCHER",
-            "namespace": "vibesdk-default-namespace",
-            "remote": true
-        }
-    ],
+	"dispatch_namespaces": [
+		{
+			"binding": "DISPATCHER",
+			"namespace": "vibesdk-default-namespace",
+			"remote": true
+		}
+	],
 	"containers": [
 		{
 			"class_name": "UserAppSandboxService",
 			"image": "./SandboxDockerfile",
 			"max_instances": 2900,
-            "instance_type": {"vcpu": 4, "memory_mib": 4096, "disk_mb": 6144},
-            "rollout_step_percentage": 100
+			"instance_type": {
+				"vcpu": 4,
+				"memory_mib": 4096,
+				"disk_mb": 6144
+			},
+			"rollout_step_percentage": 100
 		}
 	],
 	"d1_databases": [
@@ -66,41 +78,81 @@
 			"remote": true
 		}
 	],
-	"durable_objects": {"bindings": [
-			{"class_name": "CodeGeneratorAgent","name": "CodeGenObject"},
-            {"class_name": "UserAppSandboxService","name": "Sandbox"},
-            {"class_name": "DORateLimitStore","name": "DORateLimitStore"}
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "CodeGeneratorAgent",
+				"name": "CodeGenObject"
+			},
+			{
+				"class_name": "UserAppSandboxService",
+				"name": "Sandbox"
+			},
+			{
+				"class_name": "DORateLimitStore",
+				"name": "DORateLimitStore"
+			}
 		]
 	},
-    "r2_buckets": [
-      {"binding": "TEMPLATES_BUCKET","bucket_name": "vibesdk-templates","remote": true}
-    ],
-    "kv_namespaces": [
-        {"binding": "VibecoderStore","id": "8f3b0fe77e55426da1245ab5fb1a46f3","remote": true},
-        {"binding": "WEBAUTHN_CHALLENGES","id": "auto", "preview_id": "auto", "remote": true}
-    ],
+	"r2_buckets": [
+		{
+			"binding": "TEMPLATES_BUCKET",
+			"bucket_name": "vibesdk-templates",
+			"remote": true
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "VibecoderStore",
+			"id": "8f3b0fe77e55426da1245ab5fb1a46f3",
+			"remote": true
+		},
+		{
+			"binding": "WEBAUTHN_CHALLENGES",
+			"id": "f61ce51b0dcf4e8986fae2f8e1a7238d",
+			"remote": true
+		}
+	],
 	"migrations": [
-		{"new_sqlite_classes": ["CodeGeneratorAgent","UserAppSandboxService"],"tag": "v1"},
-        {"new_sqlite_classes": ["DORateLimitStore"],"tag": "v2"}
+		{
+			"new_sqlite_classes": [
+				"CodeGeneratorAgent",
+				"UserAppSandboxService"
+			],
+			"tag": "v1"
+		},
+		{
+			"new_sqlite_classes": [
+				"DORateLimitStore"
+			],
+			"tag": "v2"
+		}
 	],
 	"routes": [
-        {"pattern": "build.cloudflare.dev","custom_domain": true},
-        {"pattern": "*build-preview.cloudflare.dev/*","custom_domain": false,"zone_id": "db01fac4261b2604aacad8410443a3e2"}
-    ],
+		{
+			"pattern": "build.cloudflare.dev",
+			"custom_domain": true
+		},
+		{
+			"pattern": "*build-preview.cloudflare.dev/*",
+			"custom_domain": false,
+			"zone_id": "db01fac4261b2604aacad8410443a3e2"
+		}
+	],
 	"vars": {
-        "TEMPLATES_REPOSITORY": "https://github.com/cloudflare/vibesdk-templates",
-        "ALLOWED_EMAIL": "jaketdaniels95@gmail.com",
-        "DISPATCH_NAMESPACE": "vibesdk-default-namespace",
-        "ENABLE_READ_REPLICAS": "true",
-        "CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
-        "CUSTOM_DOMAIN": "netm8.com",
-        "MAX_SANDBOX_INSTANCES": "10",
-        "SANDBOX_INSTANCE_TYPE": "standard-3",
-        "USE_CLOUDFLARE_IMAGES": false,
-        "RP_ID": "netm8.com",
-        "RP_NAME": "VibeSDK",
-        "ORIGIN": "https://netm8.com"
-    },
+		"TEMPLATES_REPOSITORY": "https://github.com/cloudflare/vibesdk-templates",
+		"ALLOWED_EMAIL": "jaketdaniels95@gmail.com",
+		"DISPATCH_NAMESPACE": "vibesdk-default-namespace",
+		"ENABLE_READ_REPLICAS": "true",
+		"CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
+		"CUSTOM_DOMAIN": "netm8.com",
+		"MAX_SANDBOX_INSTANCES": "10",
+		"SANDBOX_INSTANCE_TYPE": "standard-3",
+		"USE_CLOUDFLARE_IMAGES": false,
+		"RP_ID": "netm8.com",
+		"RP_NAME": "VibeSDK",
+		"ORIGIN": "https://netm8.com"
+	},
 	"workers_dev": false,
 	"preview_urls": false
 }
