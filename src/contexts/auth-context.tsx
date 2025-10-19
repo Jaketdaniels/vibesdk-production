@@ -1,12 +1,13 @@
 /**
- * Enhanced Auth Context
- * Provides OAuth + Email/Password authentication with backward compatibility
+ * Enhanced Auth Context with Passkey-First Authentication
+ * Provides WebAuthn passkey authentication with email/password fallback
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useSentryUser } from '@/hooks/useSentryUser';
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import type { AuthSession, AuthUser } from '../api-types';
 
 interface AuthContextType {
@@ -19,17 +20,23 @@ interface AuthContextType {
   
   // Auth provider configuration
   authProviders: {
+    passkey: boolean;
     google: boolean;
     github: boolean;
     email: boolean;
   } | null;
+  hasPasskey: boolean;
   hasOAuth: boolean;
   requiresEmailAuth: boolean;
+  
+  // Passkey methods (primary authentication)
+  loginWithPasskey: () => Promise<void>;
+  registerPasskey: (email?: string, displayName?: string) => Promise<void>;
   
   // OAuth login method with redirect support
   login: (provider: 'google' | 'github', redirectUrl?: string) => void;
   
-  // Email/password login method
+  // Email/password login method (fallback)
   loginWithEmail: (credentials: { email: string; password: string }) => Promise<void>;
   register: (data: { email: string; password: string; name?: string }) => Promise<void>;
   
@@ -54,9 +61,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authProviders, setAuthProviders] = useState<{ google: boolean; github: boolean; email: boolean; } | null>(null);
+  const [authProviders, setAuthProviders] = useState<{ passkey: boolean; google: boolean; github: boolean; email: boolean; } | null>(null);
+  const [hasPasskey, setHasPasskey] = useState<boolean>(true);
   const [hasOAuth, setHasOAuth] = useState<boolean>(false);
-  const [requiresEmailAuth, setRequiresEmailAuth] = useState<boolean>(true);
+  const [requiresEmailAuth, setRequiresEmailAuth] = useState<boolean>(false);
   const navigate = useNavigate();
   
   // Sync user context with Sentry for error tracking
@@ -93,22 +101,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-
   // Fetch auth providers configuration
   const fetchAuthProviders = useCallback(async () => {
     try {
       const response = await apiClient.getAuthProviders();
       if (response.success && response.data) {
         setAuthProviders(response.data.providers);
+        setHasPasskey(response.data.providers.passkey);
         setHasOAuth(response.data.hasOAuth);
         setRequiresEmailAuth(response.data.requiresEmailAuth);
       }
     } catch (error) {
       console.warn('Failed to fetch auth providers:', error);
-      // Fallback to defaults
-      setAuthProviders({ google: false, github: false, email: true });
+      // Fallback to passkey-first defaults
+      setAuthProviders({ passkey: true, google: false, github: false, email: true });
+      setHasPasskey(true);
       setHasOAuth(false);
-      setRequiresEmailAuth(true);
+      setRequiresEmailAuth(false);
     }
   }, []);
 
@@ -187,6 +196,125 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, [fetchAuthProviders, checkAuth]);
 
+  // Passkey login (primary authentication method)
+  const loginWithPasskey = useCallback(async () => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      // Get authentication options from server
+      const optionsResponse = await apiClient.getPasskeyAuthOptions();
+      
+      if (!optionsResponse.success || !optionsResponse.data) {
+        throw new Error('Failed to get authentication options');
+      }
+
+      // Start WebAuthn authentication
+      const authResponse = await startAuthentication(optionsResponse.data.options);
+      
+      // Verify authentication with server
+      const verifyResponse = await apiClient.verifyPasskeyAuth({
+        credential: authResponse,
+        challenge: optionsResponse.data.challenge
+      });
+
+      if (verifyResponse.success && verifyResponse.data) {
+        setUser({ ...verifyResponse.data.user, isAnonymous: false } as AuthUser);
+        setToken(null); // Using cookies for authentication
+        setSession({
+          userId: verifyResponse.data.user.id,
+          email: verifyResponse.data.user.email,
+          sessionId: verifyResponse.data.sessionId,
+          expiresAt: verifyResponse.data.expiresAt,
+        });
+        setupTokenRefresh();
+        
+        // Navigate to intended URL or default to home
+        const intendedUrl = getIntendedUrl();
+        clearIntendedUrl();
+        navigate(intendedUrl || '/');
+      }
+    } catch (error) {
+      console.error('Passkey login error:', error);
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          setError('Authentication was cancelled or timed out');
+        } else if (error.name === 'NotSupportedError') {
+          setError('Passkeys are not supported on this device');
+        } else {
+          setError(error.message || 'Authentication failed');
+        }
+      } else {
+        setError('Connection error. Please try again.');
+      }
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
+
+  // Passkey registration (primary registration method)
+  const registerPasskey = useCallback(async (email?: string, displayName?: string) => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      // Get registration options from server
+      const optionsResponse = await apiClient.getPasskeyRegOptions({
+        email,
+        displayName
+      });
+      
+      if (!optionsResponse.success || !optionsResponse.data) {
+        throw new Error('Failed to get registration options');
+      }
+
+      // Start WebAuthn registration
+      const regResponse = await startRegistration(optionsResponse.data.options);
+      
+      // Verify registration with server
+      const verifyResponse = await apiClient.verifyPasskeyReg({
+        credential: regResponse,
+        challenge: optionsResponse.data.challenge,
+        email,
+        displayName
+      });
+
+      if (verifyResponse.success && verifyResponse.data) {
+        setUser({ ...verifyResponse.data.user, isAnonymous: false } as AuthUser);
+        setToken(null); // Using cookies for authentication
+        setSession({
+          userId: verifyResponse.data.user.id,
+          email: verifyResponse.data.user.email,
+          sessionId: verifyResponse.data.sessionId,
+          expiresAt: verifyResponse.data.expiresAt,
+        });
+        setupTokenRefresh();
+        
+        // Navigate to intended URL or default to home
+        const intendedUrl = getIntendedUrl();
+        clearIntendedUrl();
+        navigate(intendedUrl || '/');
+      }
+    } catch (error) {
+      console.error('Passkey registration error:', error);
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          setError('Registration was cancelled or timed out');
+        } else if (error.name === 'NotSupportedError') {
+          setError('Passkeys are not supported on this device');
+        } else {
+          setError(error.message || 'Registration failed');
+        }
+      } else {
+        setError('Connection error. Please try again.');
+      }
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
+
   // OAuth login method with redirect support
   const login = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
     // Store intended redirect URL if provided, otherwise use current location
@@ -201,7 +329,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = oauthUrl.toString();
   }, [setIntendedUrl]);
 
-  // Email/password login
+  // Email/password login (fallback)
   const loginWithEmail = useCallback(async (credentials: { email: string; password: string }) => {
     setError(null);
     setIsLoading(true);
@@ -239,7 +367,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
 
-  // Register new user
+  // Register new user (fallback)
   const register = useCallback(async (data: { email: string; password: string; name?: string }) => {
     setError(null);
     setIsLoading(true);
@@ -299,7 +427,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await checkAuth();
   }, [checkAuth]);
 
-
   // Clear error
   const clearError = useCallback(() => {
     setError(null);
@@ -313,11 +440,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     error,
     authProviders,
+    hasPasskey,
     hasOAuth,
     requiresEmailAuth,
+    loginWithPasskey, // Primary authentication method
+    registerPasskey, // Primary registration method
     login, // OAuth method with redirect support
-    loginWithEmail, // Email/password method
-    register,
+    loginWithEmail, // Email/password method (fallback)
+    register, // Email/password registration (fallback)
     logout,
     refreshUser,
     clearError,
