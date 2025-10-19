@@ -1,6 +1,6 @@
 /**
- * Authentication Modal Provider
- * Provides global authentication modal management
+ * Enhanced Authentication Modal Provider with Passkey-First Authentication
+ * Provides global authentication modal management with WebAuthn passkey support
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
@@ -33,7 +33,16 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
   const [modalContext, setModalContext] = useState<string | undefined>();
   const [pendingAction, setPendingAction] = useState<(() => void) | undefined>();
   const [intendedUrl, setIntendedUrlState] = useState<string | undefined>();
-  const { login, loginWithEmail, register, error, clearError, isAuthenticated } = useAuth();
+  const { 
+    login, 
+    loginWithEmail, 
+    loginWithPasskey, 
+    register, 
+    registerPasskey, 
+    error, 
+    clearError, 
+    isAuthenticated 
+  } = useAuth();
 
   const showAuthModal = useCallback((context?: string, onSuccess?: () => void, intendedUrl?: string) => {
     setModalContext(context);
@@ -63,11 +72,29 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
     }
   }, [isAuthenticated, pendingAction, isAuthModalOpen, hideAuthModal]);
 
-  const handleLogin = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
+  const handleOAuthLogin = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
     // Use the intended URL if available, otherwise use the provided redirect URL
     const finalRedirectUrl = intendedUrl || redirectUrl;
     login(provider, finalRedirectUrl);
   }, [login, intendedUrl]);
+
+  const handlePasskeyLogin = useCallback(async () => {
+    try {
+      await loginWithPasskey();
+    } catch (error) {
+      // Error handling is done in the auth context
+      console.error('Passkey login failed:', error);
+    }
+  }, [loginWithPasskey]);
+
+  const handlePasskeyRegister = useCallback(async (email?: string, displayName?: string) => {
+    try {
+      await registerPasskey(email, displayName);
+    } catch (error) {
+      // Error handling is done in the auth context
+      console.error('Passkey registration failed:', error);
+    }
+  }, [registerPasskey]);
 
   // Set up global auth modal trigger for API client
   useEffect(() => {
@@ -87,9 +114,11 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
         isOpen={isAuthModalOpen}
         onClose={hideAuthModal}
         onLogin={login} // Fallback for backward compatibility
-        onOAuthLogin={handleLogin}
+        onOAuthLogin={handleOAuthLogin}
         onEmailLogin={loginWithEmail}
+        onPasskeyLogin={handlePasskeyLogin} // Primary authentication method
         onRegister={register}
+        onPasskeyRegister={handlePasskeyRegister} // Primary registration method
         error={error}
         onClearError={clearError}
         actionContext={modalContext}
