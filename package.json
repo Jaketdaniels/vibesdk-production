@@ -6,7 +6,7 @@
 	"scripts": {
 		"setup": "tsx scripts/setup.ts",
 		"dev": "DEV_MODE=true vite",
-		"prebuild": "rm -rf node_modules/.tmp/*.tsbuildinfo",
+		"prebuild": "wrangler types --include-runtime false && rm -rf node_modules/.tmp/*.tsbuildinfo",
 		"build": "tsc -b --incremental && vite build",
 		"typecheck": "tsc -b --incremental",
 		"lint": "eslint .",
