@@ -227,10 +227,12 @@ export type ProfileResponseData = {
 
 export interface AuthProvidersResponseData {
   providers: {
+    passkey: boolean;
     google: boolean;
     github: boolean;
     email: boolean;
   };
+  hasPasskey: boolean;
   hasOAuth: boolean;
   requiresEmailAuth: boolean;
   csrfToken?: string;
