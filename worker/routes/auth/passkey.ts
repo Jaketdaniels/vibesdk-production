@@ -10,13 +10,14 @@ import {
   verifyRegistrationResponse,
   verifyAuthenticationResponse
 } from '@simplewebauthn/server';
-import type { 
+import type {
   GenerateRegistrationOptionsOpts,
   GenerateAuthenticationOptionsOpts,
   VerifyRegistrationResponseOpts,
-  VerifyAuthenticationResponseOpts
+  VerifyAuthenticationResponseOpts,
+  AuthenticatorTransport
 } from '@simplewebauthn/server';
-import { isoUint8Array } from '@simplewebauthn/server/helpers';
+import { isoUint8Array, isoBase64URL } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 
@@ -35,6 +36,26 @@ type AppEnv = {
 
 const app = new Hono<AppEnv>();
 
+// Database record types
+interface UserRecord {
+  id: string;
+  email: string | null;
+  name: string | null;
+  display_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CredentialRecord {
+  user_id: string;
+  credential_id: string;
+  public_key: string;
+  counter: number;
+  transports: string | null;
+  aaguid: string | null;
+  created_at: string;
+}
+
 // Schema validators
 const registrationOptionsSchema = z.object({
   email: z.string().email().optional(),
@@ -52,7 +73,7 @@ const registrationVerificationSchema = z.object({
     }),
     type: z.literal('public-key'),
     clientExtensionResults: z.record(z.any()).optional(),
-    authenticatorAttachment: z.string().optional()
+    authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional()
   }),
   challenge: z.string(),
   email: z.string().email().optional(),
@@ -71,7 +92,7 @@ const authenticationVerificationSchema = z.object({
     }),
     type: z.literal('public-key'),
     clientExtensionResults: z.record(z.any()).optional(),
-    authenticatorAttachment: z.string().optional()
+    authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional()
   }),
   challenge: z.string()
 });
@@ -103,21 +124,21 @@ async function deleteChallenge(env: CloudflareBindings, key: string) {
 }
 
 // Database helpers
-async function getUserByEmail(env: CloudflareBindings, email: string) {
+async function getUserByEmail(env: CloudflareBindings, email: string): Promise<UserRecord | null> {
   const result = await env.DB.prepare(
     'SELECT * FROM users WHERE email = ?'
   ).bind(email).first();
-  return result;
+  return result as UserRecord | null;
 }
 
-async function getUserById(env: CloudflareBindings, id: string) {
+async function getUserById(env: CloudflareBindings, id: string): Promise<UserRecord | null> {
   const result = await env.DB.prepare(
     'SELECT * FROM users WHERE id = ?'
   ).bind(id).first();
-  return result;
+  return result as UserRecord | null;
 }
 
-async function createUser(env: CloudflareBindings, data: { id: string; email?: string; displayName?: string }) {
+async function createUser(env: CloudflareBindings, data: { id: string; email?: string; displayName?: string }): Promise<UserRecord | null> {
   const result = await env.DB.prepare(`
     INSERT INTO users (id, email, name, display_name, created_at, updated_at)
     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
@@ -128,7 +149,7 @@ async function createUser(env: CloudflareBindings, data: { id: string; email?: s
     data.displayName || null,
     data.displayName || null
   ).first();
-  return result;
+  return result as UserRecord | null;
 }
 
 async function getCredentialsByUserId(env: CloudflareBindings, userId: string) {
@@ -138,11 +159,11 @@ async function getCredentialsByUserId(env: CloudflareBindings, userId: string) {
   return results.results;
 }
 
-async function getCredentialById(env: CloudflareBindings, credentialId: string) {
+async function getCredentialById(env: CloudflareBindings, credentialId: string): Promise<CredentialRecord | null> {
   const result = await env.DB.prepare(
     'SELECT * FROM webauthn_credentials WHERE credential_id = ?'
   ).bind(credentialId).first();
-  return result;
+  return result as CredentialRecord | null;
 }
 
 async function saveCredential(env: CloudflareBindings, data: {
@@ -328,16 +349,16 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 
     // Save credential
     await saveCredential(env, {
-      userId: user.id,
-      credentialId: isoUint8Array.toBase64URL(credentialID),
-      publicKey: isoUint8Array.toBase64URL(credentialPublicKey),
+      userId: user.id as string,
+      credentialId: isoBase64URL.fromBuffer(credentialID),
+      publicKey: isoBase64URL.fromBuffer(credentialPublicKey),
       counter,
       transports: credential.response.transports,
-      aaguid: aaguid ? isoUint8Array.toBase64URL(aaguid) : undefined
+      aaguid: aaguid ? isoBase64URL.fromBuffer(aaguid) : undefined
     });
 
     // Create session
-    const session = await createSession(env, user.id);
+    const session = await createSession(env, user.id as string);
     const sessionCookie = getSessionCookie(session.id, session.expires_at);
 
     return c.json({
@@ -444,10 +465,10 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
       expectedOrigin: env.ORIGIN,
       expectedRPID: env.RP_ID,
       authenticator: {
-        credentialID: isoUint8Array.fromBase64URL(credentialRecord.credential_id),
-        credentialPublicKey: isoUint8Array.fromBase64URL(credentialRecord.public_key),
+        credentialID: isoBase64URL.toBuffer(credentialRecord.credential_id),
+        credentialPublicKey: isoBase64URL.toBuffer(credentialRecord.public_key),
         counter: credentialRecord.counter,
-        transports: credentialRecord.transports ? JSON.parse(credentialRecord.transports) : undefined
+        transports: credentialRecord.transports ? JSON.parse(credentialRecord.transports) as AuthenticatorTransport[] : undefined
       },
       requireUserVerification: false
     });
@@ -464,10 +485,10 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
     await deleteChallenge(env, challengeKey);
 
     // Update credential counter
-    await updateCredentialCounter(env, credentialRecord.credential_id, verification.authenticationInfo.newCounter);
+    await updateCredentialCounter(env, credentialRecord.credential_id as string, verification.authenticationInfo.newCounter);
 
     // Create session
-    const session = await createSession(env, user.id);
+    const session = await createSession(env, user.id as string);
     const sessionCookie = getSessionCookie(session.id, session.expires_at);
 
     return c.json({
