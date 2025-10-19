@@ -146,12 +146,20 @@
 		"ENABLE_READ_REPLICAS": "true",
 		"CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
 		"CUSTOM_DOMAIN": "netm8.com",
+		"CUSTOM_PREVIEW_DOMAIN": "netm8.com",
 		"MAX_SANDBOX_INSTANCES": "10",
 		"SANDBOX_INSTANCE_TYPE": "standard-3",
 		"USE_CLOUDFLARE_IMAGES": false,
 		"RP_ID": "netm8.com",
 		"RP_NAME": "VibeSDK",
-		"ORIGIN": "https://netm8.com"
+		"ORIGIN": "https://netm8.com",
+		"SANDBOX_SERVICE_URL": "",
+		"SANDBOX_SERVICE_API_KEY": "",
+		"CLOUDFLARE_ACCOUNT_ID": "",
+		"CLOUDFLARE_API_TOKEN": "",
+		"ALLOCATION_STRATEGY": "MANY_TO_ONE",
+		"USE_TUNNEL_FOR_PREVIEW": "false",
+		"ENVIRONMENT": "production"
 	},
 	"workers_dev": false,
 	"preview_urls": false
