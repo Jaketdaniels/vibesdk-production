@@ -215,8 +215,10 @@ export function ByokApiKeysModal({
       setActiveTab('manage');
       setSelectedProvider(null);
       setApiKey('');
-    } catch {
-      toast.error('Failed to save API key. Please try again.');
+    } catch (error) {
+      console.error('Failed to save API key:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Failed to save API key. Please try again.';
+      toast.error(errorMsg);
     } finally {
       setIsSaving(false);
     }

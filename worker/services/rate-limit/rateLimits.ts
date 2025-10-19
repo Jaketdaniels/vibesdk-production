@@ -241,9 +241,29 @@ export class RateLimitService {
         model: AIModels | string,
         suffix: string = ""
 	): Promise<void> {
-		
+
 		if (!config[RateLimitType.LLM_CALLS].enabled) {
 			return;
+		}
+
+		// Exclude BYOK users from rate limits if configured
+		if (config[RateLimitType.LLM_CALLS].excludeBYOKUsers) {
+			try {
+				const { SecretsService } = await import('../../database/services/SecretsService');
+				const secretsService = new SecretsService(env);
+				const userBYOKKeys = await secretsService.getUserBYOKKeysMap(userId);
+
+				if (userBYOKKeys.size > 0) {
+					this.logger.info('Skipping rate limit for BYOK user', {
+						userId,
+						keyCount: userBYOKKeys.size
+					});
+					return;
+				}
+			} catch (error) {
+				this.logger.error('Failed to check BYOK status for rate limiting', error);
+				// Continue with rate limiting on error
+			}
 		}
 
 		const identifier = `user:${userId}`;
