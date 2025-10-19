@@ -20,10 +20,14 @@ import type {
 import { isoUint8Array, isoBase64URL } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
+import { RateLimitService } from '../../services/rate-limit/rateLimits';
+import { createLogger } from '../../logger';
 
 // =============================================================================
 // TYPE DEFINITIONS
 // =============================================================================
+
+const logger = createLogger('PasskeyAuth');
 
 interface CloudflareBindings {
 	DB: D1Database;
@@ -136,8 +140,8 @@ function generateChallenge(): string {
 		.replace(/=/g, '');
 }
 
-function buildRegistrationChallengeKey(userId: string, challenge: string): string {
-	return `reg:${userId}:${challenge}`;
+function buildRegistrationChallengeKey(challenge: string): string {
+	return `reg-challenge:${challenge}`;
 }
 
 function buildAuthenticationChallengeKey(challenge: string): string {
@@ -161,25 +165,34 @@ async function deleteChallenge(env: CloudflareBindings, key: string): Promise<vo
 	await env.WEBAUTHN_CHALLENGES.delete(key);
 }
 
+async function storeRegistrationChallenge(
+	env: CloudflareBindings,
+	userId: string,
+	challenge: string,
+	ttlSeconds: number = CHALLENGE_TTL_SECONDS
+): Promise<void> {
+	const key = buildRegistrationChallengeKey(challenge);
+	const data = JSON.stringify({ userId, challenge, createdAt: Date.now() });
+	await env.WEBAUTHN_CHALLENGES.put(key, data, { expirationTtl: ttlSeconds });
+}
+
 async function findRegistrationChallenge(
 	env: CloudflareBindings,
 	challenge: string
 ): Promise<{ storedChallenge: string; challengeKey: string; userId: string } | null> {
-	const challengeKeys = await env.WEBAUTHN_CHALLENGES.list({ prefix: 'reg:' });
+	const key = buildRegistrationChallengeKey(challenge);
+	const data = await env.WEBAUTHN_CHALLENGES.get(key);
 
-	for (const key of challengeKeys.keys) {
-		const stored = await retrieveChallenge(env, key.name);
-		if (stored === challenge) {
-			const userId = key.name.split(':')[1];
-			return {
-				storedChallenge: stored,
-				challengeKey: key.name,
-				userId,
-			};
-		}
+	if (!data) {
+		return null;
 	}
 
-	return null;
+	const parsed = JSON.parse(data);
+	return {
+		storedChallenge: parsed.challenge,
+		challengeKey: key,
+		userId: parsed.userId,
+	};
 }
 
 // =============================================================================
@@ -250,7 +263,11 @@ async function updateCredentialCounter(
 	credentialId: string,
 	counter: number
 ): Promise<void> {
-	await env.DB.prepare('UPDATE webauthn_credentials SET counter = ? WHERE credential_id = ?')
+	await env.DB.prepare(`
+		UPDATE webauthn_credentials
+		SET counter = ?, last_used_at = datetime('now')
+		WHERE credential_id = ?
+	`)
 		.bind(counter, credentialId)
 		.run();
 }
@@ -273,9 +290,33 @@ function calculateSessionExpiry(): Date {
 	return new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
 }
 
-async function createSession(env: CloudflareBindings, userId: string): Promise<SessionData> {
+async function hashToken(token: string): Promise<string> {
+	const encoder = new TextEncoder();
+	const data = encoder.encode(token);
+	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+	const hashArray = Array.from(new Uint8Array(hashBuffer));
+	return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function createSession(
+	env: CloudflareBindings,
+	userId: string,
+	deviceInfo?: string
+): Promise<SessionData> {
 	const sessionId = generateSessionId();
 	const expiresAt = calculateSessionExpiry();
+
+	const accessToken = crypto.randomUUID();
+	const refreshToken = crypto.randomUUID();
+	const accessTokenHash = await hashToken(accessToken);
+	const refreshTokenHash = await hashToken(refreshToken);
+
+	await env.DB.prepare(`
+		INSERT INTO sessions (id, user_id, access_token_hash, refresh_token_hash, expires_at, created_at, device_info, is_revoked)
+		VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 0)
+	`)
+		.bind(sessionId, userId, accessTokenHash, refreshTokenHash, Math.floor(expiresAt.getTime() / 1000), deviceInfo || 'passkey-device')
+		.run();
 
 	return {
 		id: sessionId,
@@ -311,6 +352,19 @@ async function buildExcludedCredentials(
 
 const app = new Hono<AppEnv>();
 
+// Rate limiting middleware for all passkey endpoints
+app.use('*', async (c, next) => {
+	const rateLimitService = new RateLimitService(c.env.AUTH_RATE_LIMITER);
+	const clientIP = c.req.header('cf-connecting-ip') || 'unknown';
+
+	const allowed = await rateLimitService.checkLimit(`passkey:${clientIP}`);
+	if (!allowed) {
+		return c.json({ success: false, error: 'Rate limit exceeded. Please try again later.' }, 429);
+	}
+
+	return next();
+});
+
 // Registration: Generate options
 app.post('/register/options', zValidator('json', registrationOptionsSchema), async (c) => {
 	try {
@@ -328,8 +382,7 @@ app.post('/register/options', zValidator('json', registrationOptionsSchema), asy
 		}
 
 		const challenge = generateChallenge();
-		const challengeKey = buildRegistrationChallengeKey(userId, challenge);
-		await storeChallenge(env, challengeKey, challenge);
+		await storeRegistrationChallenge(env, userId, challenge);
 
 		const excludeCredentials = user ? await buildExcludedCredentials(env, userId) : [];
 
@@ -359,7 +412,10 @@ app.post('/register/options', zValidator('json', registrationOptionsSchema), asy
 			},
 		});
 	} catch (error) {
-		console.error('Registration options error:', error);
+		logger.error('Registration options generation failed', {
+			error: error instanceof Error ? error.message : String(error),
+			email: c.req.valid('json').email || 'none',
+		});
 		return c.json(
 			{
 				success: false,
@@ -460,7 +516,10 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 			}
 		);
 	} catch (error) {
-		console.error('Registration verification error:', error);
+		logger.error('Registration verification failed', {
+			error: error instanceof Error ? error.message : String(error),
+			email: c.req.valid('json').email || 'none',
+		});
 		return c.json(
 			{
 				success: false,
@@ -494,7 +553,9 @@ app.post('/auth/options', async (c) => {
 			},
 		});
 	} catch (error) {
-		console.error('Authentication options error:', error);
+		logger.error('Authentication options generation failed', {
+			error: error instanceof Error ? error.message : String(error),
+		});
 		return c.json(
 			{
 				success: false,
@@ -602,7 +663,10 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 			}
 		);
 	} catch (error) {
-		console.error('Authentication verification error:', error);
+		logger.error('Authentication verification failed', {
+			error: error instanceof Error ? error.message : String(error),
+			credentialId: c.req.valid('json').credential?.id || 'unknown',
+		});
 		return c.json(
 			{
 				success: false,

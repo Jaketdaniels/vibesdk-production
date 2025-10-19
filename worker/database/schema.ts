@@ -123,6 +123,31 @@ export const apiKeys = sqliteTable('api_keys', {
     expiresAtIdx: index('api_keys_expires_at_idx').on(table.expiresAt),
 }));
 
+/**
+ * WebAuthn Credentials table - Passkey credentials for passwordless authentication
+ */
+export const webauthnCredentials = sqliteTable('webauthn_credentials', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+
+    // Credential Identity
+    credentialId: text('credential_id').notNull().unique(),
+    publicKey: text('public_key').notNull(),
+
+    // Security
+    counter: integer('counter').notNull().default(0),
+    transports: text('transports'), // JSON array of AuthenticatorTransport
+    aaguid: text('aaguid'), // Authenticator AAGUID
+
+    // Timing
+    createdAt: text('created_at').notNull(),
+    lastUsedAt: text('last_used_at'),
+}, (table) => ({
+    userIdIdx: index('idx_webauthn_credentials_user_id').on(table.userId),
+    credentialIdIdx: index('idx_webauthn_credentials_credential_id').on(table.credentialId),
+    createdAtIdx: index('idx_webauthn_credentials_created_at').on(table.createdAt),
+}));
+
 // ========================================
 // CORE APP AND GENERATION SYSTEM
 // ========================================
