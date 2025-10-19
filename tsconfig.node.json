@@ -9,7 +9,7 @@
               "./worker/*"
             ]
 		},
-		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+		"tsBuildInfoFile": "./.cache/tsconfig.node.tsbuildinfo",
 		"target": "ES2022",
 		"lib": ["ES2023"],
 		"module": "ESNext",

@@ -13,7 +13,6 @@ export default defineConfig({
 	optimizeDeps: {
 		exclude: ['format', 'editor.all'],
 		include: ['monaco-editor/esm/vs/editor/editor.api'],
-		force: true,
 	},
 	plugins: [
 		react(),
@@ -70,12 +69,13 @@ export default defineConfig({
 		allowedHosts: true,
 	},
 
-	// Clear cache more aggressively
-	cacheDir: 'node_modules/.vite',
+	cacheDir: '.cache/vite',
 
 	build: {
-		sourcemap: true,
+		sourcemap: 'hidden',
 		chunkSizeWarningLimit: 1000,
+		minify: 'esbuild',
+		target: 'es2022',
 		rollupOptions: {
 			output: {
 				manualChunks: {
