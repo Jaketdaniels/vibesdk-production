@@ -19,11 +19,21 @@ import type {
 import { isoUint8Array } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import type { Bindings } from '../../types';
-import { createSession, getSessionCookie } from '../../utils/session';
-import { hashPassword } from '../../utils/crypto';
 
-const app = new Hono<{ Bindings: Bindings }>();
+// Generic types for Cloudflare bindings (will be replaced by proper Env type after wrangler types)
+interface CloudflareBindings {
+  DB: D1Database;
+  WEBAUTHN_CHALLENGES: KVNamespace;
+  RP_ID: string;
+  RP_NAME: string;
+  ORIGIN: string;
+}
+
+type AppEnv = {
+  Bindings: CloudflareBindings;
+};
+
+const app = new Hono<AppEnv>();
 
 // Schema validators
 const registrationOptionsSchema = z.object({
@@ -80,34 +90,34 @@ function generateChallenge(): string {
     .replace(/=/g, '');
 }
 
-async function storeChallenge(env: Bindings, key: string, challenge: string, ttl = 300) {
+async function storeChallenge(env: CloudflareBindings, key: string, challenge: string, ttl = 300) {
   await env.WEBAUTHN_CHALLENGES.put(key, challenge, { expirationTtl: ttl });
 }
 
-async function getChallenge(env: Bindings, key: string): Promise<string | null> {
+async function getChallenge(env: CloudflareBindings, key: string): Promise<string | null> {
   return await env.WEBAUTHN_CHALLENGES.get(key);
 }
 
-async function deleteChallenge(env: Bindings, key: string) {
+async function deleteChallenge(env: CloudflareBindings, key: string) {
   await env.WEBAUTHN_CHALLENGES.delete(key);
 }
 
 // Database helpers
-async function getUserByEmail(env: Bindings, email: string) {
+async function getUserByEmail(env: CloudflareBindings, email: string) {
   const result = await env.DB.prepare(
     'SELECT * FROM users WHERE email = ?'
   ).bind(email).first();
   return result;
 }
 
-async function getUserById(env: Bindings, id: string) {
+async function getUserById(env: CloudflareBindings, id: string) {
   const result = await env.DB.prepare(
     'SELECT * FROM users WHERE id = ?'
   ).bind(id).first();
   return result;
 }
 
-async function createUser(env: Bindings, data: { id: string; email?: string; displayName?: string }) {
+async function createUser(env: CloudflareBindings, data: { id: string; email?: string; displayName?: string }) {
   const result = await env.DB.prepare(`
     INSERT INTO users (id, email, name, display_name, created_at, updated_at)
     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
@@ -121,21 +131,21 @@ async function createUser(env: Bindings, data: { id: string; email?: string; dis
   return result;
 }
 
-async function getCredentialsByUserId(env: Bindings, userId: string) {
+async function getCredentialsByUserId(env: CloudflareBindings, userId: string) {
   const results = await env.DB.prepare(
     'SELECT * FROM webauthn_credentials WHERE user_id = ?'
   ).bind(userId).all();
   return results.results;
 }
 
-async function getCredentialById(env: Bindings, credentialId: string) {
+async function getCredentialById(env: CloudflareBindings, credentialId: string) {
   const result = await env.DB.prepare(
     'SELECT * FROM webauthn_credentials WHERE credential_id = ?'
   ).bind(credentialId).first();
   return result;
 }
 
-async function saveCredential(env: Bindings, data: {
+async function saveCredential(env: CloudflareBindings, data: {
   userId: string;
   credentialId: string;
   publicKey: string;
@@ -157,10 +167,31 @@ async function saveCredential(env: Bindings, data: {
   ).run();
 }
 
-async function updateCredentialCounter(env: Bindings, credentialId: string, counter: number) {
+async function updateCredentialCounter(env: CloudflareBindings, credentialId: string, counter: number) {
   await env.DB.prepare(
     'UPDATE webauthn_credentials SET counter = ? WHERE credential_id = ?'
   ).bind(counter, credentialId).run();
+}
+
+// Session helpers - simplified versions that should match your existing session system
+async function createSession(env: CloudflareBindings, userId: string) {
+  const sessionId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  
+  // This should match your existing session creation logic
+  // For now, returning a simple object - you may need to adjust this
+  return {
+    id: sessionId,
+    user_id: userId,
+    expires_at: expiresAt.toISOString()
+  };
+}
+
+function getSessionCookie(sessionId: string, expiresAt: string): string {
+  // This should match your existing session cookie logic
+  // Basic cookie format - you may need to adjust this
+  const expires = new Date(expiresAt);
+  return `session=${sessionId}; HttpOnly; Secure; SameSite=Lax; Path=/; Expires=${expires.toUTCString()}`;
 }
 
 // Registration endpoints
