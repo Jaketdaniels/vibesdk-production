@@ -39,6 +39,13 @@ export class AuthController extends BaseController {
     }
     
     /**
+     * Check if passkeys are supported (based on required environment variables)
+     */
+    static hasPasskeySupport(env: Env): boolean {
+        return !!env.RP_ID && !!env.RP_NAME && !!env.ORIGIN && !!env.WEBAUTHN_CHALLENGES;
+    }
+    
+    /**
      * Register a new user
      * POST /api/auth/register
      */
@@ -645,6 +652,7 @@ export class AuthController extends BaseController {
     ): Promise<Response> {
         try {
             const providers = {
+                passkey: AuthController.hasPasskeySupport(env), // Check if passkey is supported
                 google: !!env.GOOGLE_CLIENT_ID && !!env.GOOGLE_CLIENT_SECRET,
                 github: !!env.GITHUB_CLIENT_ID && !!env.GITHUB_CLIENT_SECRET,
                 email: true
@@ -655,8 +663,9 @@ export class AuthController extends BaseController {
             
             const response = AuthController.createSuccessResponse({
                 providers,
+                hasPasskey: providers.passkey,
                 hasOAuth: providers.google || providers.github,
-                requiresEmailAuth: !providers.google && !providers.github,
+                requiresEmailAuth: !providers.passkey && !providers.google && !providers.github, // Email is fallback if no other methods
                 csrfToken,
                 csrfExpiresIn: Math.floor(CsrfService.defaults.tokenTTL / 1000)
             });
