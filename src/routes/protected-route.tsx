@@ -2,7 +2,7 @@ import { Navigate } from 'react-router';
 import { useAuth } from '../contexts/auth-context';
 import { Skeleton } from '../components/ui/skeleton';
 
-interface ProtectedRouteProps {
+export interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 

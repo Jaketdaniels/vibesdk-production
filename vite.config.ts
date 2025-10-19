@@ -12,7 +12,13 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
 	optimizeDeps: {
 		exclude: ['format', 'editor.all'],
-		include: ['monaco-editor/esm/vs/editor/editor.api'],
+		include: [
+			'monaco-editor/esm/vs/editor/editor.api',
+			'react',
+			'react-dom',
+			'react-router',
+		],
+		holdUntilCrawlEnd: false,
 	},
 	plugins: [
 		react(),
@@ -76,9 +82,11 @@ export default defineConfig({
 		chunkSizeWarningLimit: 1000,
 		minify: 'esbuild',
 		target: 'es2022',
+		cssMinify: 'esbuild',
+		cssCodeSplit: true,
 		rollupOptions: {
 			output: {
-				manualChunks(id) {
+				manualChunks(id): string | undefined {
 					if (id.includes('node_modules')) {
 						if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
 							return 'vendor-react';
@@ -92,8 +100,20 @@ export default defineConfig({
 						if (id.includes('date-fns') || id.includes('clsx') || id.includes('tailwind-merge')) {
 							return 'vendor-utils';
 						}
+						if (id.includes('@sentry')) {
+							return 'vendor-sentry';
+						}
+						if (id.includes('hono')) {
+							return 'vendor-hono';
+						}
 					}
+					return undefined;
 				},
+			},
+			treeshake: {
+				moduleSideEffects: 'no-external',
+				propertyReadSideEffects: false,
+				unknownGlobalSideEffects: false,
 			},
 		},
 	},

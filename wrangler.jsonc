@@ -10,6 +10,31 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	"build": {
+		"watch_paths": [
+			"worker/**/*.ts",
+			"shared/**/*.ts",
+			"wrangler.jsonc",
+			"package.json"
+		],
+		"exclude": [
+			"**/*.test.ts",
+			"**/*.test.tsx",
+			"**/*.spec.ts",
+			"**/*.spec.tsx",
+			"**/__tests__/**",
+			"**/__mocks__/**",
+			"**/docs/**",
+			"**/scripts/**",
+			"**/*.md",
+			"vitest.config.ts",
+			"knip.json"
+		],
+		"caching": {
+			"enabled": true
+		}
+	},
+	"minify": true,
 	"version_metadata": {
 		"binding": "CF_VERSION_METADATA"
 	},

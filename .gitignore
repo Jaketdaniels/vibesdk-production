@@ -50,3 +50,31 @@ debug-tools/*.json
 # Sentry Config File
 .env.sentry-build-plugin
 data-dump
+
+# Test files - exclude from deployments
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+**/__tests__/
+**/__mocks__/
+
+# Documentation - exclude from deployments
+docs/
+*.md
+!README.md
+samplePrompts.md
+
+# Scripts - exclude from deployments (not needed at runtime)
+scripts/
+
+# Development tools
+knip.json
+.editorconfig
+eslint.config.js
+vitest.config.ts
+drizzle.config.*.ts
+
+# Container files
+SandboxDockerfile
+container/

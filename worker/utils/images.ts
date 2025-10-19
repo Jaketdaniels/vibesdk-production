@@ -27,7 +27,7 @@ export async function uploadImageToCloudflareImages(env: Env, image: ImageAttach
     const filename = `${image.id}-${type}-${image.filename}`;
 
     const data = bytes ?? base64ToUint8Array(image.base64Data!);
-    const blob = new Blob([data], { type: image.mimeType });
+    const blob = new Blob([data as Uint8Array<ArrayBuffer>], { type: image.mimeType });
     const form = new FormData();
     form.append('file', blob, filename);
 

@@ -1,12 +1,14 @@
 {
 	"compilerOptions": {
+		"composite": true,
+		"incremental": true,
 		"tsBuildInfoFile": "./.cache/tsconfig.app.tsbuildinfo",
 		"target": "ES2022",
 		"useDefineForClassFields": true,
 		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"module": "ESNext",
 		"skipLibCheck": true,
-		// "types": ["./worker-configuration.d.ts", "vite/client", "jest"],
+		"types": ["@cloudflare/workers-types", "./worker-configuration.d.ts", "vite/client"],
 
 		/* Bundler mode */
 		"moduleResolution": "bundler",
@@ -36,5 +38,6 @@
           ]
 		}
 	},
-	"include": ["src", "shared"],
+	"include": ["src", "shared", "worker"],
+	"exclude": ["**/*.test.ts", "**/*.spec.ts", "**/__tests__", "**/__mocks__"]
 }
