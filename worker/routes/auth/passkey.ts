@@ -1,0 +1,467 @@
+/**
+ * Passkey Authentication Routes for Cloudflare Workers
+ * Implements WebAuthn registration and authentication using SimpleWebAuthn
+ */
+
+import { Hono } from 'hono';
+import { 
+  generateRegistrationOptions, 
+  generateAuthenticationOptions,
+  verifyRegistrationResponse,
+  verifyAuthenticationResponse
+} from '@simplewebauthn/server';
+import type { 
+  GenerateRegistrationOptionsOpts,
+  GenerateAuthenticationOptionsOpts,
+  VerifyRegistrationResponseOpts,
+  VerifyAuthenticationResponseOpts
+} from '@simplewebauthn/server';
+import { isoUint8Array } from '@simplewebauthn/server/helpers';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
+import type { Bindings } from '../../types';
+import { createSession, getSessionCookie } from '../../utils/session';
+import { hashPassword } from '../../utils/crypto';
+
+const app = new Hono<{ Bindings: Bindings }>();
+
+// Schema validators
+const registrationOptionsSchema = z.object({
+  email: z.string().email().optional(),
+  displayName: z.string().min(1).optional()
+});
+
+const registrationVerificationSchema = z.object({
+  credential: z.object({
+    id: z.string(),
+    rawId: z.string(),
+    response: z.object({
+      attestationObject: z.string(),
+      clientDataJSON: z.string(),
+      transports: z.array(z.string()).optional()
+    }),
+    type: z.literal('public-key'),
+    clientExtensionResults: z.record(z.any()).optional(),
+    authenticatorAttachment: z.string().optional()
+  }),
+  challenge: z.string(),
+  email: z.string().email().optional(),
+  displayName: z.string().optional()
+});
+
+const authenticationVerificationSchema = z.object({
+  credential: z.object({
+    id: z.string(),
+    rawId: z.string(),
+    response: z.object({
+      authenticatorData: z.string(),
+      clientDataJSON: z.string(),
+      signature: z.string(),
+      userHandle: z.string().optional()
+    }),
+    type: z.literal('public-key'),
+    clientExtensionResults: z.record(z.any()).optional(),
+    authenticatorAttachment: z.string().optional()
+  }),
+  challenge: z.string()
+});
+
+// Helper functions
+function generateUserId(): string {
+  return crypto.randomUUID();
+}
+
+function generateChallenge(): string {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+async function storeChallenge(env: Bindings, key: string, challenge: string, ttl = 300) {
+  await env.WEBAUTHN_CHALLENGES.put(key, challenge, { expirationTtl: ttl });
+}
+
+async function getChallenge(env: Bindings, key: string): Promise<string | null> {
+  return await env.WEBAUTHN_CHALLENGES.get(key);
+}
+
+async function deleteChallenge(env: Bindings, key: string) {
+  await env.WEBAUTHN_CHALLENGES.delete(key);
+}
+
+// Database helpers
+async function getUserByEmail(env: Bindings, email: string) {
+  const result = await env.DB.prepare(
+    'SELECT * FROM users WHERE email = ?'
+  ).bind(email).first();
+  return result;
+}
+
+async function getUserById(env: Bindings, id: string) {
+  const result = await env.DB.prepare(
+    'SELECT * FROM users WHERE id = ?'
+  ).bind(id).first();
+  return result;
+}
+
+async function createUser(env: Bindings, data: { id: string; email?: string; displayName?: string }) {
+  const result = await env.DB.prepare(`
+    INSERT INTO users (id, email, name, display_name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+    RETURNING *
+  `).bind(
+    data.id,
+    data.email || null,
+    data.displayName || null,
+    data.displayName || null
+  ).first();
+  return result;
+}
+
+async function getCredentialsByUserId(env: Bindings, userId: string) {
+  const results = await env.DB.prepare(
+    'SELECT * FROM webauthn_credentials WHERE user_id = ?'
+  ).bind(userId).all();
+  return results.results;
+}
+
+async function getCredentialById(env: Bindings, credentialId: string) {
+  const result = await env.DB.prepare(
+    'SELECT * FROM webauthn_credentials WHERE credential_id = ?'
+  ).bind(credentialId).first();
+  return result;
+}
+
+async function saveCredential(env: Bindings, data: {
+  userId: string;
+  credentialId: string;
+  publicKey: string;
+  counter: number;
+  transports?: string[];
+  aaguid?: string;
+}) {
+  await env.DB.prepare(`
+    INSERT INTO webauthn_credentials 
+    (user_id, credential_id, public_key, counter, transports, aaguid, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  `).bind(
+    data.userId,
+    data.credentialId,
+    data.publicKey,
+    data.counter,
+    data.transports ? JSON.stringify(data.transports) : null,
+    data.aaguid || null
+  ).run();
+}
+
+async function updateCredentialCounter(env: Bindings, credentialId: string, counter: number) {
+  await env.DB.prepare(
+    'UPDATE webauthn_credentials SET counter = ? WHERE credential_id = ?'
+  ).bind(counter, credentialId).run();
+}
+
+// Registration endpoints
+app.post('/register/options', zValidator('json', registrationOptionsSchema), async (c) => {
+  try {
+    const { email, displayName } = c.req.valid('json');
+    const env = c.env;
+
+    // Generate user ID (will be used for new user or existing user)
+    let userId = generateUserId();
+    let user = null;
+
+    // If email provided, check if user exists
+    if (email) {
+      user = await getUserByEmail(env, email);
+      if (user) {
+        userId = user.id;
+      }
+    }
+
+    // Generate challenge
+    const challenge = generateChallenge();
+    const challengeKey = `reg:${userId}:${challenge}`;
+
+    // Store challenge with TTL
+    await storeChallenge(env, challengeKey, challenge, 300); // 5 minutes
+
+    // Generate registration options
+    const options = await generateRegistrationOptions({
+      rpName: env.RP_NAME,
+      rpID: env.RP_ID,
+      userID: isoUint8Array.fromUTF8String(userId),
+      userName: email || `user_${userId}`,
+      userDisplayName: displayName || email || `User ${userId}`,
+      challenge: isoUint8Array.fromUTF8String(challenge),
+      attestationType: 'none',
+      // Exclude existing credentials for this user
+      excludeCredentials: user ? (await getCredentialsByUserId(env, userId)).map((cred: any) => ({
+        id: isoUint8Array.fromBase64URL(cred.credential_id),
+        type: 'public-key',
+        transports: cred.transports ? JSON.parse(cred.transports) : undefined
+      })) : [],
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',
+        authenticatorAttachment: 'platform'
+      },
+      supportedAlgorithmIDs: [-7, -257] // ES256, RS256
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        options,
+        challenge,
+        userId
+      }
+    });
+  } catch (error) {
+    console.error('Registration options error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to generate registration options'
+    }, 500);
+  }
+});
+
+app.post('/register/verify', zValidator('json', registrationVerificationSchema), async (c) => {
+  try {
+    const { credential, challenge, email, displayName } = c.req.valid('json');
+    const env = c.env;
+
+    // Find stored challenge
+    const challengeKeys = await env.WEBAUTHN_CHALLENGES.list({ prefix: `reg:` });
+    let storedChallenge = null;
+    let challengeKey = null;
+    let userId = null;
+
+    for (const key of challengeKeys.keys) {
+      const stored = await getChallenge(env, key.name);
+      if (stored === challenge) {
+        storedChallenge = stored;
+        challengeKey = key.name;
+        userId = key.name.split(':')[1]; // Extract userId from reg:userId:challenge
+        break;
+      }
+    }
+
+    if (!storedChallenge || !userId) {
+      return c.json({
+        success: false,
+        error: 'Invalid or expired challenge'
+      }, 400);
+    }
+
+    // Verify registration
+    const verification = await verifyRegistrationResponse({
+      response: credential,
+      expectedChallenge: storedChallenge,
+      expectedOrigin: env.ORIGIN,
+      expectedRPID: env.RP_ID,
+      requireUserVerification: false
+    });
+
+    if (!verification.verified || !verification.registrationInfo) {
+      await deleteChallenge(env, challengeKey);
+      return c.json({
+        success: false,
+        error: 'Registration verification failed'
+      }, 400);
+    }
+
+    // Clean up challenge
+    await deleteChallenge(env, challengeKey);
+
+    const { credentialPublicKey, credentialID, counter, aaguid } = verification.registrationInfo;
+
+    // Create or get user
+    let user = await getUserById(env, userId);
+    if (!user) {
+      user = await createUser(env, {
+        id: userId,
+        email,
+        displayName
+      });
+    }
+
+    if (!user) {
+      return c.json({
+        success: false,
+        error: 'Failed to create user'
+      }, 500);
+    }
+
+    // Save credential
+    await saveCredential(env, {
+      userId: user.id,
+      credentialId: isoUint8Array.toBase64URL(credentialID),
+      publicKey: isoUint8Array.toBase64URL(credentialPublicKey),
+      counter,
+      transports: credential.response.transports,
+      aaguid: aaguid ? isoUint8Array.toBase64URL(aaguid) : undefined
+    });
+
+    // Create session
+    const session = await createSession(env, user.id);
+    const sessionCookie = getSessionCookie(session.id, session.expires_at);
+
+    return c.json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          displayName: user.display_name,
+          createdAt: user.created_at
+        },
+        sessionId: session.id,
+        expiresAt: new Date(session.expires_at)
+      }
+    }, 200, {
+      'Set-Cookie': sessionCookie
+    });
+  } catch (error) {
+    console.error('Registration verification error:', error);
+    return c.json({
+      success: false,
+      error: 'Registration verification failed'
+    }, 500);
+  }
+});
+
+// Authentication endpoints
+app.post('/auth/options', async (c) => {
+  try {
+    const env = c.env;
+
+    // Generate challenge
+    const challenge = generateChallenge();
+    const challengeKey = `auth:${challenge}`;
+
+    // Store challenge with TTL
+    await storeChallenge(env, challengeKey, challenge, 300); // 5 minutes
+
+    // Generate authentication options
+    const options = await generateAuthenticationOptions({
+      rpID: env.RP_ID,
+      challenge: isoUint8Array.fromUTF8String(challenge),
+      userVerification: 'preferred'
+      // Note: not specifying allowCredentials to allow platform to choose
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        options,
+        challenge
+      }
+    });
+  } catch (error) {
+    console.error('Authentication options error:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to generate authentication options'
+    }, 500);
+  }
+});
+
+app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), async (c) => {
+  try {
+    const { credential, challenge } = c.req.valid('json');
+    const env = c.env;
+
+    // Find and verify stored challenge
+    const challengeKey = `auth:${challenge}`;
+    const storedChallenge = await getChallenge(env, challengeKey);
+
+    if (!storedChallenge || storedChallenge !== challenge) {
+      return c.json({
+        success: false,
+        error: 'Invalid or expired challenge'
+      }, 400);
+    }
+
+    // Get credential from database
+    const credentialRecord = await getCredentialById(env, credential.id);
+    if (!credentialRecord) {
+      await deleteChallenge(env, challengeKey);
+      return c.json({
+        success: false,
+        error: 'Credential not found'
+      }, 400);
+    }
+
+    // Get user
+    const user = await getUserById(env, credentialRecord.user_id);
+    if (!user) {
+      await deleteChallenge(env, challengeKey);
+      return c.json({
+        success: false,
+        error: 'User not found'
+      }, 400);
+    }
+
+    // Verify authentication
+    const verification = await verifyAuthenticationResponse({
+      response: credential,
+      expectedChallenge: storedChallenge,
+      expectedOrigin: env.ORIGIN,
+      expectedRPID: env.RP_ID,
+      authenticator: {
+        credentialID: isoUint8Array.fromBase64URL(credentialRecord.credential_id),
+        credentialPublicKey: isoUint8Array.fromBase64URL(credentialRecord.public_key),
+        counter: credentialRecord.counter,
+        transports: credentialRecord.transports ? JSON.parse(credentialRecord.transports) : undefined
+      },
+      requireUserVerification: false
+    });
+
+    if (!verification.verified) {
+      await deleteChallenge(env, challengeKey);
+      return c.json({
+        success: false,
+        error: 'Authentication verification failed'
+      }, 400);
+    }
+
+    // Clean up challenge
+    await deleteChallenge(env, challengeKey);
+
+    // Update credential counter
+    await updateCredentialCounter(env, credentialRecord.credential_id, verification.authenticationInfo.newCounter);
+
+    // Create session
+    const session = await createSession(env, user.id);
+    const sessionCookie = getSessionCookie(session.id, session.expires_at);
+
+    return c.json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          displayName: user.display_name,
+          createdAt: user.created_at
+        },
+        sessionId: session.id,
+        expiresAt: new Date(session.expires_at)
+      }
+    }, 200, {
+      'Set-Cookie': sessionCookie
+    });
+  } catch (error) {
+    console.error('Authentication verification error:', error);
+    return c.json({
+      success: false,
+      error: 'Authentication verification failed'
+    }, 500);
+  }
+});
+
+export default app;
