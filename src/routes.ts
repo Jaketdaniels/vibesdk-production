@@ -11,6 +11,9 @@ import AppView from './routes/app';
 import DiscoverPage from './routes/discover';
 import { ProtectedRoute } from './routes/protected-route';
 
+// New: Passkey setup route for creating a passkey after email signup or for account recovery
+const PasskeySetup = React.lazy(() => import('./routes/passkey-setup'));
+
 const routes = [
 	{
 		path: '/',
@@ -44,6 +47,10 @@ const routes = [
 				path: 'discover',
 				Component: DiscoverPage,
 			},
+            {
+                path: 'passkey/setup',
+                element: React.createElement(ProtectedRoute, { children: React.createElement(PasskeySetup) }),
+            },
 		],
 	},
 ] satisfies RouteObject[];
