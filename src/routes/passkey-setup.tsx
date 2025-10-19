@@ -3,7 +3,7 @@
  * Allows users to enroll a passkey after email signup or for account recovery
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { KeyRound, Shield, Smartphone, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router';
@@ -24,7 +24,7 @@ export default function PasskeySetup() {
     clearError();
 
     try {
-      await registerPasskey(user.email, user.name || user.displayName);
+      await registerPasskey(user.email, user.displayName);
       setEnrollmentSuccess(true);
     } catch (err) {
       console.error('Passkey enrollment failed:', err);

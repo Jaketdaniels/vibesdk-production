@@ -42,7 +42,17 @@ export class AuthController extends BaseController {
      * Check if passkeys are supported (based on required environment variables)
      */
     static hasPasskeySupport(env: Env): boolean {
-        return !!env.RP_ID && !!env.RP_NAME && !!env.ORIGIN && !!env.WEBAUTHN_CHALLENGES;
+        type PasskeyEnv = Env & {
+            RP_ID?: string;
+            RP_NAME?: string;
+            ORIGIN?: string;
+            WEBAUTHN_CHALLENGES?: KVNamespace;
+        };
+        const passkeyEnv = env as PasskeyEnv;
+        return !!passkeyEnv.RP_ID &&
+               !!passkeyEnv.RP_NAME &&
+               !!passkeyEnv.ORIGIN &&
+               !!passkeyEnv.WEBAUTHN_CHALLENGES;
     }
     
     /**

@@ -11,10 +11,6 @@ import {
 	verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
 import type {
-	GenerateRegistrationOptionsOpts,
-	GenerateAuthenticationOptionsOpts,
-	VerifyRegistrationResponseOpts,
-	VerifyAuthenticationResponseOpts,
 	AuthenticatorTransport,
 	RegistrationResponseJSON,
 	AuthenticationResponseJSON,
@@ -22,7 +18,6 @@ import type {
 import { isoUint8Array, isoBase64URL } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { createLogger } from '../../logger';
 
 // =============================================================================
@@ -229,8 +224,8 @@ async function insertUser(env: CloudflareBindings, data: CreateUserData): Promis
 async function findCredentialsByUserId(env: CloudflareBindings, userId: string): Promise<CredentialRecord[]> {
 	const results = await env.DB.prepare('SELECT * FROM webauthn_credentials WHERE user_id = ?')
 		.bind(userId)
-		.all();
-	return results.results as CredentialRecord[];
+		.all<CredentialRecord>();
+	return results.results ?? [];
 }
 
 async function findCredentialById(
@@ -352,19 +347,6 @@ async function buildExcludedCredentials(
 // =============================================================================
 
 const app = new Hono<AppEnv>();
-
-// Rate limiting middleware for all passkey endpoints
-app.use('*', async (c, next) => {
-	const rateLimitService = new RateLimitService(c.env.AUTH_RATE_LIMITER);
-	const clientIP = c.req.header('cf-connecting-ip') || 'unknown';
-
-	const allowed = await rateLimitService.checkLimit(`passkey:${clientIP}`);
-	if (!allowed) {
-		return c.json({ success: false, error: 'Rate limit exceeded. Please try again later.' }, 429);
-	}
-
-	return next();
-});
 
 // Registration: Generate options
 app.post('/register/options', zValidator('json', registrationOptionsSchema), async (c) => {
@@ -490,7 +472,7 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 			publicKey: isoBase64URL.fromBuffer(webAuthnCredential.publicKey),
 			counter: webAuthnCredential.counter,
 			transports: credential.response.transports,
-			aaguid: isoBase64URL.fromBuffer(aaguid),
+			aaguid,
 		});
 
 		const session = await createSession(env, user.id);
