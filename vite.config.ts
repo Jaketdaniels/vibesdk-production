@@ -13,20 +13,8 @@ export default defineConfig({
 	optimizeDeps: {
 		exclude: ['format', 'editor.all'],
 		include: ['monaco-editor/esm/vs/editor/editor.api'],
-		force: true, // Force re-optimization on every start
-		// Override deprecated esbuildOptions from plugins with rollupOptions
-		rollupOptions: {},
+		force: true,
 	},
-
-	// build: {
-	//     rollupOptions: {
-	//       output: {
-	//             advancedChunks: {
-	//                 groups: [{name: 'vendor', test: /node_modules/}]
-	//             }
-	//         }
-	//     }
-	// },
 	plugins: [
 		react(),
 		svgr(),
@@ -87,5 +75,16 @@ export default defineConfig({
 
 	build: {
 		sourcemap: true,
+		chunkSizeWarningLimit: 1000,
+		rollupOptions: {
+			output: {
+				manualChunks: {
+					'vendor-react': ['react', 'react-dom', 'react-router'],
+					'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-select', '@radix-ui/react-tabs'],
+					'vendor-monaco': ['monaco-editor'],
+					'vendor-utils': ['date-fns', 'clsx', 'tailwind-merge'],
+				},
+			},
+		},
 	},
 });
