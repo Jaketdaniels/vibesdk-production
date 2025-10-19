@@ -78,11 +78,21 @@ export default defineConfig({
 		target: 'es2022',
 		rollupOptions: {
 			output: {
-				manualChunks: {
-					'vendor-react': ['react', 'react-dom', 'react-router'],
-					'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-select', '@radix-ui/react-tabs'],
-					'vendor-monaco': ['monaco-editor'],
-					'vendor-utils': ['date-fns', 'clsx', 'tailwind-merge'],
+				manualChunks(id) {
+					if (id.includes('node_modules')) {
+						if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+							return 'vendor-react';
+						}
+						if (id.includes('@radix-ui')) {
+							return 'vendor-ui';
+						}
+						if (id.includes('monaco-editor')) {
+							return 'vendor-monaco';
+						}
+						if (id.includes('date-fns') || id.includes('clsx') || id.includes('tailwind-merge')) {
+							return 'vendor-utils';
+						}
+					}
 				},
 			},
 		},
