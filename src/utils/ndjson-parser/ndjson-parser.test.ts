@@ -88,14 +88,14 @@ describe('NDJSONStreamParser', () => {
     });
 
     it('should handle special characters in JSON', () => {
-      const chunk = '{"text":"Hello\\nWorld","emoji":"😊","unicode":"\\u0048\\u0065\\u006c\\u006c\\u006f"}\n';
-      
+      const chunk = '{"text":"Hello\\nWorld","emoji":"\\ud83d\\ude0a","unicode":"\\u0048\\u0065\\u006c\\u006c\\u006f"}\n';
+
       parser.processChunk(chunk);
-      
+
       expect(receivedMessages).toHaveLength(1);
       expect(receivedMessages[0]).toEqual({
         text: 'Hello\nWorld',
-        emoji: '😊',
+        emoji: '\ud83d\ude0a',
         unicode: 'Hello'
       });
     });

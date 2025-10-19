@@ -16,6 +16,7 @@ import { useDragDrop } from '@/hooks/use-drag-drop';
 import { ImageUploadButton } from '@/components/image-upload-button';
 import { ImageAttachmentPreview } from '@/components/image-attachment-preview';
 import { SUPPORTED_IMAGE_MIME_TYPES } from '@/api-types';
+import { toast } from 'sonner';
 
 export default function Home() {
 	const navigate = useNavigate();
@@ -27,7 +28,7 @@ export default function Home() {
 
 	const { images, addImages, removeImage, clearImages, isProcessing } = useImageUpload({
 		onError: (error) => {
-			// TODO: Show error toast/notification
+			toast.error(error || 'Failed to upload image');
 			console.error('Image upload error:', error);
 		},
 	});

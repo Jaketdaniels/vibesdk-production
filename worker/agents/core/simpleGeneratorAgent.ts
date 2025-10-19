@@ -425,7 +425,7 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
         return this.state.phasesCounter;
     }
 
-    private getOperationOptions(): OperationOptions {
+    protected getOperationOptions(): OperationOptions {
         return {
             env: this.env,
             agentId: this.getAgentId(),

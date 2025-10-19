@@ -27,6 +27,7 @@ import { createLogger } from '../../logger';
 import { validateEmail, validatePassword } from '../../utils/validationUtils';
 import { extractRequestMetadata } from '../../utils/authUtils';
 import { BaseService } from './BaseService';
+import { EmailService } from '../../services/email/EmailService';
 
 const logger = createLogger('AuthService');
 
@@ -54,13 +55,25 @@ export interface RegistrationData {
 export class AuthService extends BaseService {
     private readonly sessionService: SessionService;
     private readonly passwordService: PasswordService;
-    
+    private readonly emailService: EmailService | null;
+
     constructor(
         env: Env,
     ) {
         super(env);
         this.sessionService = new SessionService(env);
         this.passwordService = new PasswordService();
+
+        if (env.RESEND_API_KEY && env.RESEND_FROM_EMAIL) {
+            this.emailService = new EmailService({
+                apiKey: env.RESEND_API_KEY,
+                fromEmail: env.RESEND_FROM_EMAIL,
+                fromName: 'VibeSdk',
+            });
+        } else {
+            this.emailService = null;
+            logger.warn('Email service not configured: RESEND_API_KEY or RESEND_FROM_EMAIL missing');
+        }
     }
     
     /**
@@ -575,20 +588,37 @@ export class AuthService extends BaseService {
      * Generate and store verification OTP for email
      */
     private async generateAndStoreVerificationOtp(email: string): Promise<void> {
-        const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiry
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresInMinutes = 15;
+        const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-        // Store OTP in database (you may need to create a verification_otps table)
         await this.database.insert(schema.verificationOtps).values({
             id: generateId(),
             email: email.toLowerCase(),
-            otp: await this.passwordService.hash(otp), // Hash the OTP for security
+            otp: await this.passwordService.hash(otp),
             expiresAt,
             createdAt: new Date()
         });
 
-        // TODO: Send email with OTP (integrate with email service)
-        logger.info('Verification OTP generated', { email, otp: otp.slice(0, 2) + '****' });
+        if (this.emailService) {
+            try {
+                await this.emailService.sendOTPEmail({
+                    to: email,
+                    otp,
+                    expiresInMinutes,
+                });
+                logger.info('Verification OTP sent via email', { email, otp: otp.slice(0, 2) + '****' });
+            } catch (error) {
+                logger.error('Failed to send verification email', { email, error });
+                throw new SecurityError(
+                    SecurityErrorType.INVALID_INPUT,
+                    'Failed to send verification email',
+                    500
+                );
+            }
+        } else {
+            logger.warn('Email service not available, OTP not sent', { email, otp: otp.slice(0, 2) + '****' });
+        }
     }
 
     /**

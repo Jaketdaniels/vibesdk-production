@@ -91,7 +91,7 @@ const SYSTEM_PROMPT = `You are Orange, the conversational AI interface for Cloud
 
 1. **For general questions or discussions**: Simply respond naturally and helpfully. Be friendly and informative.
 
-2. **When users want to modify their app or point out issues/bugs**: 
+2. **When users want to modify their app or point out issues/bugs**:
    - First acknowledge in first person: "I'll add that", "I'll fix that issue"
    - Then call the queue_request tool with a clear, actionable description (this internally relays to the dev agent)
    - The modification request should be specific but NOT include code-level implementation details
@@ -126,16 +126,16 @@ Users may face issues, bugs and runtime errors. When they report these, queue th
         - After this initial loop, the system goes into a maintainance loop of code review <> file regeneration where a CodeReview Agent reviews the code and patches files in parallel as needed.
         - After few reviewcycles, we finish the app.
     - If a user makes any demands, the request is first sent to you. And then your job is to queue the request using the queue_request tool.
-        - If the phase generation <> implementation loop is not finished, the queued requests would be fetched whenever the next phase planning happens. 
+        - If the phase generation <> implementation loop is not finished, the queued requests would be fetched whenever the next phase planning happens.
         - If the review loop is running, then after code reviews are finished, the state machine next enters phase generation loop again.
         - If the state machine had ended, we restart it in the phase generation loop with your queued requests.
         - Any queued request thus might take some time for implementation.
     - During each phase generation and phase implementation, the agents try to fetch the latest runtime errors from the sandbox too.
         - They do their best to fix them, however sometimes they might fail, so they need to be prompted again. The agents don't have full visibility on server logs though, they can only see the errors and static analysis. User must report their own experiences and issues through you.
-    - The frontend has several buttons for the user - 
+    - The frontend has several buttons for the user -
         - Deploy to cloudflare: button to deploy the app to cloudflare workers, as sandbox previews are ephemeral.
         - Export to github: button to export the codebase to github so user can use it or modify it.
-        - Refresh: button to refresh the preview. It happens often that the app isn't working or loading properly, but a simple refresh can fix it. Although you should still report this by queueing a request. 
+        - Refresh: button to refresh the preview. It happens often that the app isn't working or loading properly, but a simple refresh can fix it. Although you should still report this by queueing a request.
         - Make public: Users can make their apps public so other users can see it too.
         - Discover page: Users can see other public apps here.
 
@@ -255,7 +255,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
     async execute(inputs: UserConversationInputs, options: OperationOptions): Promise<UserConversationOutputs> {
         const { env, logger, context, agent } = options;
         const { userMessage, conversationState, errors, images, projectUpdates } = inputs;
-        logger.info("Processing user message", { 
+        logger.info("Processing user message", {
             messageLength: inputs.userMessage.length,
             hasImages: !!images && images.length > 0,
             imageCount: images?.length || 0
@@ -263,7 +263,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
 
         try {
             const systemPromptMessages = getSystemPromptWithProjectContext(SYSTEM_PROMPT, context, CodeSerializerType.SIMPLE);
-            
+
             // Create user message with optional images for inference
             const userPromptForInference = buildUserMessageWithContext(userMessage, errors, projectUpdates, true);
             const userMessageForInference = images && images.length > 0
@@ -275,14 +275,14 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                 : createUserMessage(userPromptForInference);
 
             let extractedUserResponse = "";
-            
+
             // Generate unique conversation ID for this turn
             const aiConversationId = IdGenerator.generateConversationId();
 
             logger.info("Generated conversation ID", { aiConversationId });
 
             const toolCallRenderer = buildToolCallRenderer(inputs.conversationResponseCallback, aiConversationId);
-            
+
             // Assemble all tools with lifecycle callbacks for UI updates
             const tools = buildTools(agent, logger).map(td => ({
                 ...td,
@@ -294,7 +294,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
 
             const compactHistory = await this.compactifyContext(runningHistory, env, options, toolCallRenderer, logger);
             if (compactHistory.length !== runningHistory.length) {
-                logger.info("Conversation history compactified", { 
+                logger.info("Conversation history compactified", {
                     fullHistoryLength: conversationState.fullHistory.length,
                     runningHistoryLength: conversationState.runningHistory.length,
                     compactifiedRunningHistoryLength: compactHistory.length,
@@ -305,12 +305,12 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
             const messagesForInference =  [...systemPromptMessages, ...compactHistory, {...userMessageForInference, conversationId: IdGenerator.generateConversationId()}];
 
 
-            logger.info("Executing inference for user message", { 
+            logger.info("Executing inference for user message", {
                 messageLength: userMessage.length,
                 aiConversationId,
                 tools,
             });
-            
+
             // Don't save the system prompts so that every time new initial prompts can be generated with latest project context
             // Use inference message (with images) for AI, but store text-only in history
             const result = await executeInference({
@@ -329,7 +329,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                 }
             });
 
-            
+
             logger.info("Successfully processed user message", {
                 streamingSuccess: !!extractedUserResponse,
             });
@@ -338,7 +338,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                 userResponse: extractedUserResponse
             };
 
-            
+
             // For conversation history, store only text (images are ephemeral and not persisted)
             const userPromptForHistory = buildUserMessageWithContext(userMessage, errors, projectUpdates, false);
             const userMessageForHistory = images && images.length > 0
@@ -349,7 +349,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                 )
                 : createUserMessage(userPromptForHistory);
 
-            
+
             const messages = [{...userMessageForHistory, conversationId: IdGenerator.generateConversationId()}];
 
             // Save the assistant's response to conversation history
@@ -388,13 +388,13 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
             logger.error("Error processing user message:", error);
             if (error instanceof RateLimitExceededError || error instanceof SecurityError) {
                 throw error;
-            }   
+            }
 
             const fallbackMessages = [
                 {...createUserMessage(userMessage), conversationId: IdGenerator.generateConversationId()},
                 {...createAssistantMessage(FALLBACK_USER_RESPONSE), conversationId: IdGenerator.generateConversationId()}
             ]
-            
+
             // Fallback response
             return {
                 conversationResponse: {
@@ -428,7 +428,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
      */
     private estimateTokens(messages: ConversationMessage[]): number {
         let totalChars = 0;
-        
+
         for (const msg of messages) {
             if (typeof msg.content === 'string') {
                 totalChars += msg.content.length;
@@ -443,7 +443,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                     }
                 }
             }
-            
+
             // Account for tool calls
             if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
                 for (const tc of msg.tool_calls as ChatCompletionMessageFunctionToolCall[]) {
@@ -460,7 +460,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                 }
             }
         }
-        
+
         return this.tokensFromChars(totalChars);
     }
 
@@ -475,15 +475,15 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
     } {
         const turns = this.countTurns(messages);
         const estimatedTokens = this.estimateTokens(messages);
-        
+
         if (turns >= COMPACTIFICATION_CONFIG.MAX_TURNS) {
             return { should: true, reason: 'turns', turns, estimatedTokens };
         }
-        
+
         if (estimatedTokens >= COMPACTIFICATION_CONFIG.MAX_ESTIMATED_TOKENS) {
             return { should: true, reason: 'tokens', turns, estimatedTokens };
         }
-        
+
         return { should: false, turns, estimatedTokens };
     }
 
@@ -494,11 +494,11 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
     private findTurnBoundary(messages: ConversationMessage[], preserveCount: number): number {
         // Start from the point where we want to split
         const targetSplitIndex = messages.length - preserveCount;
-        
+
         if (targetSplitIndex <= 0) {
             return 0;
         }
-        
+
         // Walk backwards to find the nearest user message boundary
         for (let i = targetSplitIndex; i >= 0; i--) {
             if (messages[i].role === 'user') {
@@ -506,7 +506,7 @@ export class UserConversationProcessor extends AgentOperation<UserConversationIn
                 return i;
             }
         }
-        
+
         // If no user message found, don't split
         return 0;
     }
@@ -551,7 +551,7 @@ Provide the summary now:`
             });
 
             const summary = summaryResult.string.trim();
-            
+
             logger.info('Generated conversation summary', {
                 summaryLength: summary.length,
                 summaryTokens: this.tokensFromChars(summary.length)
@@ -573,7 +573,7 @@ Provide the summary now:`
 
     /**
      * Intelligent conversation compactification system
-     * 
+     *
      * Strategy:
      * - Monitors turns (user message to user message) and token count
      * - Triggers at 50 turns OR ~100k tokens
@@ -591,12 +591,12 @@ Provide the summary now:`
         try {
             // Check if compactification is needed on the running history
             const analysis = this.shouldCompactify(runningHistory);
-            
+
             if (!analysis.should) {
                 // No compactification needed
                 return runningHistory;
             }
-            
+
             logger.info('Compactification triggered', {
                 reason: analysis.reason,
                 turns: analysis.turns,
@@ -605,36 +605,36 @@ Provide the summary now:`
             });
 
             // Currently compactification would be done on the running history, but should we consider doing it on the full history?
-            
+
             // Find turn boundary for splitting
             const splitIndex = this.findTurnBoundary(
                 runningHistory,
                 COMPACTIFICATION_CONFIG.PRESERVE_RECENT_MESSAGES
             );
-            
+
             // Safety check: ensure we have something to compactify
             if (splitIndex <= 0) {
                 logger.warn('Cannot find valid turn boundary for compactification, preserving all messages');
                 return runningHistory;
             }
-            
+
             // Split messages
             const messagesToSummarize = runningHistory.slice(0, splitIndex);
             const recentMessages = runningHistory.slice(splitIndex);
-            
+
             logger.info('Compactification split determined', {
                 summarizeCount: messagesToSummarize.length,
                 preserveCount: recentMessages.length,
                 splitIndex
             });
-            
-            toolCallRenderer({ 
-                name: 'summarize_history', 
-                status: 'start', 
-                args: { 
+
+            toolCallRenderer({
+                name: 'summarize_history',
+                status: 'start',
+                args: {
                     messageCount: messagesToSummarize.length,
-                    recentCount: recentMessages.length 
-                } 
+                    recentCount: recentMessages.length
+                }
             });
 
             // Generate LLM-powered summary
@@ -648,25 +648,25 @@ Provide the summary now:`
             // Create summary message - its conversationId will be the archive ID
             const summarizedTurns = this.countTurns(messagesToSummarize);
             const archiveId = `archive-${Date.now()}-${IdGenerator.generateConversationId()}`;
-            
+
             const summaryMessage: ConversationMessage = {
                 role: 'assistant' as MessageRole,
                 content: `[Conversation History Summary: ${messagesToSummarize.length} messages, ${summarizedTurns} turns]\n[Archive ID: ${archiveId}]\n\n${summary}`,
                 conversationId: archiveId
             };
-            
-            toolCallRenderer({ 
-                name: 'summarize_history', 
-                status: 'success', 
-                args: { 
+
+            toolCallRenderer({
+                name: 'summarize_history',
+                status: 'success',
+                args: {
                     summary: summary.substring(0, 200) + '...',
-                    archiveId 
-                } 
+                    archiveId
+                }
             });
-            
+
             // Return summary + recent messages
             const compactifiedHistory = [summaryMessage, ...recentMessages];
-            
+
             logger.info('Compactification completed with archival', {
                 originalMessageCount: runningHistory.length,
                 newMessageCount: compactifiedHistory.length,
@@ -675,12 +675,12 @@ Provide the summary now:`
                 archivedMessageCount: messagesToSummarize.length,
                 archiveId
             });
-            
+
             return compactifiedHistory;
-            
+
         } catch (error) {
             logger.error('Compactification failed, preserving original messages', { error });
-            
+
             // Safe fallback: if we have too many messages, keep recent ones
             if (runningHistory.length > COMPACTIFICATION_CONFIG.PRESERVE_RECENT_MESSAGES * 3) {
                 const fallbackCount = COMPACTIFICATION_CONFIG.PRESERVE_RECENT_MESSAGES * 2;

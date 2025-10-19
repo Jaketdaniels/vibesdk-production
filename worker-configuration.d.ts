@@ -42,6 +42,8 @@ declare namespace Cloudflare {
 		CF_ACCESS_ID: string;
 		CF_ACCESS_SECRET: string;
 		SENTRY_DSN: string;
+		RESEND_API_KEY: string;
+		RESEND_FROM_EMAIL: string;
 		CodeGenObject: DurableObjectNamespace<import("./worker/index").CodeGeneratorAgent>;
 		Sandbox: DurableObjectNamespace<import("./worker/index").UserAppSandboxService>;
 		DORateLimitStore: DurableObjectNamespace<import("./worker/index").DORateLimitStore>;

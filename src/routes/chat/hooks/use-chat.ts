@@ -101,10 +101,11 @@ export function useChat({
 	const [isDeploying, setIsDeploying] = useState(false);
 	const [cloudflareDeploymentUrl, setCloudflareDeploymentUrl] = useState<string>('');
 	const [deploymentError, setDeploymentError] = useState<string>();
-	
+	const deploymentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
 	// Preview deployment state
 	const [isPreviewDeploying, setIsPreviewDeploying] = useState(false);
-	
+
 	// Redeployment state - tracks when redeploy button should be enabled
 	const [isRedeployReady, setIsRedeployReady] = useState(false);
 	// const [lastDeploymentPhaseCount, setLastDeploymentPhaseCount] = useState(0);
@@ -536,6 +537,23 @@ export function useChat({
 		}
 	}, [edit]);
 
+	// Clear deployment timeout when deployment completes (success or error)
+	useEffect(() => {
+		if (!isDeploying && deploymentTimeoutRef.current) {
+			clearTimeout(deploymentTimeoutRef.current);
+			deploymentTimeoutRef.current = null;
+		}
+	}, [isDeploying]);
+
+	// Cleanup deployment timeout on unmount
+	useEffect(() => {
+		return () => {
+			if (deploymentTimeoutRef.current) {
+				clearTimeout(deploymentTimeoutRef.current);
+			}
+		};
+	}, []);
+
 	// Control functions for deployment and generation
 	const handleStopGeneration = useCallback(() => {
 		sendWebSocketMessage(websocket, 'stop_generation');
@@ -550,46 +568,51 @@ export function useChat({
 			// Send deployment command via WebSocket instead of HTTP request
 			if (sendWebSocketMessage(websocket, 'deploy', { instanceId })) {
 				logger.debug('🚀 Deployment WebSocket message sent:', instanceId);
-				
+
+				// Clear any existing timeout before setting new one
+				if (deploymentTimeoutRef.current) {
+					clearTimeout(deploymentTimeoutRef.current);
+					deploymentTimeoutRef.current = null;
+				}
+
 				// Set 1-minute timeout for deployment
-				setTimeout(() => {
+				deploymentTimeoutRef.current = setTimeout(() => {
 					if (isDeploying) {
 						logger.warn('⏰ Deployment timeout after 1 minute');
-						
+
 						// Reset deployment state
 						setIsDeploying(false);
 						setCloudflareDeploymentUrl('');
 						setIsRedeployReady(false);
-						
+
 						// Show timeout message
 						sendMessage(createAIMessage('deployment_timeout', `⏰ Deployment timed out after 1 minute.\n\n🔄 Please try deploying again. The server may be busy.`));
-						
+
 						// Debug logging for timeout
-						onDebugMessage?.('warning', 
+						onDebugMessage?.('warning',
 							'Deployment Timeout',
 							`Deployment for ${instanceId} timed out after 60 seconds`,
 							'Deployment Timeout Management'
 						);
 					}
+
+					// Clear the ref after timeout fires
+					deploymentTimeoutRef.current = null;
 				}, 60000); // 1 minute = 60,000ms
-				
-				// Store timeout ID for cleanup if deployment completes early
-				// Note: In a real implementation, you'd want to clear this timeout
-				// when deployment completes successfully
-				
+
 			} else {
 				throw new Error('WebSocket connection not available');
 			}
 		} catch (error) {
 			logger.error('❌ Error sending deployment WebSocket message:', error);
-			
+
 			// Set deployment state immediately for UI feedback
 			setIsDeploying(true);
 			// Clear any previous deployment error
 			setDeploymentError('');
 			setCloudflareDeploymentUrl('');
 			setIsRedeployReady(false);
-			
+
 			sendMessage(createAIMessage('deployment_error', `❌ Failed to initiate deployment: ${error instanceof Error ? error.message : 'Unknown error'}\n\n🔄 You can try again.`));
 		}
 	}, [websocket, sendMessage, isDeploying, onDebugMessage]);

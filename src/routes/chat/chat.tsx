@@ -1040,6 +1040,7 @@ export default function Chat() {
 												<MonacoEditor
 													className="h-full"
 													createOptions={{
+														filePath: activeFile?.filePath,
 														value:
 															activeFile?.fileContents ||
 															'',

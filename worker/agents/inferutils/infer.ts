@@ -53,7 +53,7 @@ export async function executeInference<T extends z.AnyZodObject>(
 export async function executeInference(
     params: InferenceParamsBase
 ): Promise<InferResponseString>;
-    
+
 
 export async function executeInference<T extends z.AnyZodObject>(   {
     env,
@@ -75,7 +75,7 @@ export async function executeInference<T extends z.AnyZodObject>(   {
     format?: SchemaFormat;
 }): Promise<InferResponseString | InferResponseObject<T> | null> {
     let conf: ModelConfig | undefined;
-    
+
     if (modelConfig) {
         // Use explicitly provided model config
         conf = modelConfig;

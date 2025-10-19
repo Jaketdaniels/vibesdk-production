@@ -150,27 +150,42 @@ monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
 });
 
 export type MonacoEditorProps = React.ComponentProps<'div'> & {
-	createOptions?: monaco.editor.IStandaloneEditorConstructionOptions;
+	createOptions?: monaco.editor.IStandaloneEditorConstructionOptions & {
+		filePath?: string;
+	};
 	find?: string;
 	replace?: string;
 };
 
-/**
- * TODO: Create a file map to properly manage multiple files in monaco
- */
-
 export const MonacoEditor = memo<MonacoEditorProps>(function MonacoEditor({
-	createOptions = {},
+	createOptions,
 	find,
 	replace,
 	...props
 }) {
+	const options = createOptions || {};
 	const containerRef = useRef<HTMLDivElement>(null);
-	const editor = useRef<monaco.editor.IStandaloneCodeEditor>(undefined);
-	const prevValue = useRef<string>(createOptions.value || '');
+	const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+	const modelsRef = useRef<Map<string, monaco.editor.ITextModel>>(new Map());
+	const viewStatesRef = useRef<Map<string, monaco.editor.ICodeEditorViewState | null>>(new Map());
+	const prevValue = useRef<string>(options.value || '');
+	const prevFilePath = useRef<string | undefined>(options.filePath);
 	const stickyScroll = useRef(true);
 	const { theme } = useTheme();
 
+	const getOrCreateModel = useRef((filePath: string, content: string, language: string): monaco.editor.ITextModel => {
+		let model = modelsRef.current.get(filePath);
+
+		if (!model) {
+			const uri = monaco.Uri.file(filePath);
+			model = monaco.editor.createModel(content, language, uri);
+			modelsRef.current.set(filePath, model);
+		} else if (model.getValue() !== content) {
+			model.setValue(content);
+		}
+
+		return model;
+	}).current;
 
 	useEffect(() => {
 		let configuredTheme = theme;
@@ -178,13 +193,13 @@ export const MonacoEditor = memo<MonacoEditorProps>(function MonacoEditor({
 			configuredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 		}
 		editor.current = monaco.editor.create(containerRef.current!, {
-			language: createOptions.language || 'typescript',
+			language: options.language || 'typescript',
 			minimap: { enabled: false },
 			theme: configuredTheme === 'dark' ? 'v1-dev-dark' : 'v1-dev',
 			automaticLayout: true,
 			value: defaultCode,
 			fontSize: 13,
-			...createOptions,
+			...options,
 		});
 
 		// Add scroll listener to detect user interaction
@@ -208,30 +223,73 @@ export const MonacoEditor = memo<MonacoEditorProps>(function MonacoEditor({
 
 		return () => {
 			editor.current?.dispose();
+			modelsRef.current.forEach(model => model.dispose());
+			modelsRef.current.clear();
+			viewStatesRef.current.clear();
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	useEffect(() => {
-		if (editor.current && createOptions.value !== prevValue.current) {
-			const model = editor.current.getModel();
-			if (!model) return;
+		if (!editor.current) return;
 
-			editor.current.setValue(createOptions.value || '');
+		const currentFilePath = options.filePath;
+		const hasFilePathChanged = currentFilePath !== prevFilePath.current;
+		const hasValueChanged = options.value !== prevValue.current;
 
-			if (stickyScroll.current) {
-				// Scroll to bottom
-				const lineCount = model.getLineCount();
-				editor.current.revealLine(lineCount);
+		if (hasFilePathChanged || hasValueChanged) {
+			if (currentFilePath) {
+				const currentModel = editor.current.getModel();
+
+				// Save view state for current file before switching
+				if (currentModel && prevFilePath.current) {
+					const viewState = editor.current.saveViewState();
+					viewStatesRef.current.set(prevFilePath.current, viewState);
+				}
+
+				// Get or create model for new file
+				const newModel = getOrCreateModel(
+					currentFilePath,
+					options.value || '',
+					options.language || 'typescript'
+				);
+
+				// Switch to new model
+				editor.current.setModel(newModel);
+
+				// Restore view state for new file
+				const savedViewState = viewStatesRef.current.get(currentFilePath);
+				if (savedViewState) {
+					editor.current.restoreViewState(savedViewState);
+					editor.current.focus();
+				} else if (stickyScroll.current) {
+					// Scroll to bottom for new files
+					const lineCount = newModel.getLineCount();
+					editor.current.revealLine(lineCount);
+				}
+
+				prevFilePath.current = currentFilePath;
+				prevValue.current = options.value || '';
+			} else {
+				// Fallback to old behavior when no filePath is provided
+				const model = editor.current.getModel();
+				if (!model) return;
+
+				editor.current.setValue(options.value || '');
+
+				if (stickyScroll.current) {
+					const lineCount = model.getLineCount();
+					editor.current.revealLine(lineCount);
+				}
+
+				if (options.language) {
+					monaco.editor.setModelLanguage(model, options.language);
+				}
+
+				prevValue.current = options.value || '';
 			}
-
-			if (createOptions.language) {
-				monaco.editor.setModelLanguage(model, createOptions.language);
-			}
-
-			prevValue.current = createOptions.value || '';
 		}
-	}, [createOptions.value, createOptions.language]);
+	}, [options.value, options.language, options.filePath, getOrCreateModel]);
 
 	useEffect(() => {
 		if (!editor.current || !find) return;

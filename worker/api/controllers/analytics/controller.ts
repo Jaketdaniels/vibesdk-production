@@ -7,7 +7,6 @@ import { BaseController } from '../baseController';
 import { RouteContext } from '../../types/route-context';
 import { ApiResponse, ControllerResponse } from '../types';
 import { AiGatewayAnalyticsService } from '../../../services/analytics/AiGatewayAnalyticsService';
-
 import { UserAnalyticsResponseData, AgentAnalyticsResponseData } from './types';
 import { AnalyticsError } from '../../../services/analytics/types';
 import { createLogger } from '../../../logger';
@@ -38,9 +37,12 @@ export class AnalyticsController extends BaseController {
 				);
 			}
 
-			// TODO: Add ownership verification - users should only see their own analytics
-			// For now, allow authenticated users to query any user analytics
-			// Later: if (authUser.id !== userId && !authUser.isAdmin) { return 403; }
+			if (authUser.id !== userId) {
+				return AnalyticsController.createErrorResponse<UserAnalyticsResponseData>(
+					'Unauthorized: You can only view your own analytics',
+					403,
+				);
+			}
 
 			// Parse query parameters
 			const url = new URL(request.url);
@@ -114,9 +116,8 @@ export class AnalyticsController extends BaseController {
 				);
 			}
 
-			// TODO: Add ownership verification - users should only see analytics for their own agents
-			// This would require checking if the agent/chat belongs to the authenticated user
-			// For now, allow authenticated users to query any agent analytics
+			// Note: Agent ownership verification would require adding userId to CodeGenState
+			// Currently skipped as agents are not tied to specific users in the state
 
 			// Parse query parameters
 			const url = new URL(request.url);

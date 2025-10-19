@@ -376,6 +376,39 @@ type ServerLogMessage = {
 	source?: string;
 };
 
+type SmartReviewingMessage = {
+	type: 'smart_reviewing';
+	message: string;
+};
+
+type SmartReviewedMessage = {
+	type: 'smart_reviewed';
+	message: string;
+	filesCount: number;
+	systematicPatternsCount: number;
+};
+
+type FileEnhancingMessage = {
+	type: 'file_enhancing';
+	message: string;
+	filePath: string;
+	category: string;
+	effort: string;
+};
+
+type FileEnhancedMessage = {
+	type: 'file_enhanced';
+	message: string;
+	file: FileOutputType;
+};
+
+type SmartEnhancedMessage = {
+	type: 'smart_enhanced';
+	message: string;
+	filesEnhanced: number;
+	patternsApplied: number;
+};
+
 export type WebSocketMessage =
 	| StateMessage
 	| ConversationStateMessage
@@ -424,7 +457,12 @@ export type WebSocketMessage =
 	| ModelConfigsInfoMessage
 	| TerminalCommandMessage
 	| TerminalOutputMessage
-	| ServerLogMessage;
+	| ServerLogMessage
+	| SmartReviewingMessage
+	| SmartReviewedMessage
+	| FileEnhancingMessage
+	| FileEnhancedMessage
+	| SmartEnhancedMessage;
 
 // A type representing all possible message type strings (e.g., 'generation_started', 'file_generating', etc.)
 export type WebSocketMessageType = WebSocketMessage['type'];

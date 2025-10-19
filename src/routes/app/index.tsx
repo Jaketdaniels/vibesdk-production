@@ -957,6 +957,7 @@ export default function AppView() {
 															<MonacoEditor
 																className="h-full"
 																createOptions={{
+																	filePath: activeFile.filePath,
 																	value: activeFile.fileContents,
 																	language:
 																		activeFile.language ||

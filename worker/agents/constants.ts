@@ -68,6 +68,13 @@ export const WebSocketMessageResponses: Record<string, WebSocketMessageType> = {
     // Terminal messages
     TERMINAL_OUTPUT: 'terminal_output',
     SERVER_LOG: 'server_log',
+
+    // Smart enhancement messages
+    SMART_REVIEWING: 'smart_reviewing',
+    SMART_REVIEWED: 'smart_reviewed',
+    FILE_ENHANCING: 'file_enhancing',
+    FILE_ENHANCED: 'file_enhanced',
+    SMART_ENHANCED: 'smart_enhanced',
 }
 
 // WebSocket message types
