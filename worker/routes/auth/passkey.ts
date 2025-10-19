@@ -16,6 +16,8 @@ import type {
 	VerifyRegistrationResponseOpts,
 	VerifyAuthenticationResponseOpts,
 	AuthenticatorTransport,
+	RegistrationResponseJSON,
+	AuthenticationResponseJSON,
 } from '@simplewebauthn/server';
 import { isoUint8Array, isoBase64URL } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
@@ -97,12 +99,12 @@ const registrationVerificationSchema = z.object({
 		response: z.object({
 			attestationObject: z.string(),
 			clientDataJSON: z.string(),
-			transports: z.array(z.string()).optional(),
+			transports: z.array(z.enum(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'])).optional(),
 		}),
 		type: z.literal('public-key'),
-		clientExtensionResults: z.record(z.any()).optional(),
+		clientExtensionResults: z.object({}).passthrough().optional(),
 		authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(),
-	}),
+	}) as z.ZodType<RegistrationResponseJSON>,
 	challenge: z.string(),
 	email: z.string().email().optional(),
 	displayName: z.string().optional(),
@@ -119,9 +121,9 @@ const authenticationVerificationSchema = z.object({
 			userHandle: z.string().optional(),
 		}),
 		type: z.literal('public-key'),
-		clientExtensionResults: z.record(z.any()).optional(),
+		clientExtensionResults: z.object({}).passthrough().optional(),
 		authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(),
-	}),
+	}) as z.ZodType<AuthenticationResponseJSON>,
 	challenge: z.string(),
 });
 
@@ -337,11 +339,10 @@ function buildSessionCookie(sessionId: string, expiresAt: string): string {
 async function buildExcludedCredentials(
 	env: CloudflareBindings,
 	userId: string
-): Promise<{ id: Uint8Array; type: 'public-key'; transports?: AuthenticatorTransport[] }[]> {
+): Promise<{ id: string; transports?: AuthenticatorTransport[] }[]> {
 	const credentials = await findCredentialsByUserId(env, userId);
 	return credentials.map((cred) => ({
-		id: isoBase64URL.toBuffer(cred.credential_id),
-		type: 'public-key' as const,
+		id: cred.credential_id,
 		transports: cred.transports ? (JSON.parse(cred.transports) as AuthenticatorTransport[]) : undefined,
 	}));
 }
@@ -466,7 +467,7 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 
 		await deleteChallenge(env, challengeKey);
 
-		const { credentialPublicKey, credentialID, counter, aaguid } = verification.registrationInfo;
+		const { credential: webAuthnCredential, aaguid } = verification.registrationInfo;
 
 		let user = await findUserById(env, userId);
 		if (!user) {
@@ -485,11 +486,11 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 
 		await insertCredential(env, {
 			userId: user.id,
-			credentialId: isoBase64URL.fromBuffer(credentialID),
-			publicKey: isoBase64URL.fromBuffer(credentialPublicKey),
-			counter,
+			credentialId: webAuthnCredential.id,
+			publicKey: isoBase64URL.fromBuffer(webAuthnCredential.publicKey),
+			counter: webAuthnCredential.counter,
 			transports: credential.response.transports,
-			aaguid: aaguid ? isoBase64URL.fromBuffer(aaguid) : undefined,
+			aaguid: isoBase64URL.fromBuffer(aaguid),
 		});
 
 		const session = await createSession(env, user.id);
@@ -614,9 +615,9 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 			expectedChallenge: storedChallenge,
 			expectedOrigin: env.ORIGIN,
 			expectedRPID: env.RP_ID,
-			authenticator: {
-				credentialID: isoBase64URL.toBuffer(credentialRecord.credential_id),
-				credentialPublicKey: isoBase64URL.toBuffer(credentialRecord.public_key),
+			credential: {
+				id: credentialRecord.credential_id,
+				publicKey: isoBase64URL.toBuffer(credentialRecord.public_key),
 				counter: credentialRecord.counter,
 				transports: credentialRecord.transports
 					? (JSON.parse(credentialRecord.transports) as AuthenticatorTransport[])
