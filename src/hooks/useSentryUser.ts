@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { setSentryUser, clearSentryUser } from '@/utils/sentry';
+import { useEffect, useCallback } from 'react';
+import { setSentryUser, clearSentryUser, addBreadcrumb } from '@/utils/sentry';
 import { AuthUser } from '@/api-types';
 
 /**
@@ -24,9 +24,7 @@ export function useSentryUser(user: AuthUser | null) {
  * Hook to track user actions as breadcrumbs
  */
 export function useSentryBreadcrumb() {
-  return (message: string, data?: Record<string, any>) => {
-    import('@/utils/sentry').then(({ addBreadcrumb }) => {
-      addBreadcrumb(message, 'user-action', 'info', data);
-    });
-  };
+  return useCallback((message: string, data?: Record<string, any>) => {
+    addBreadcrumb(message, 'user-action', 'info', data);
+  }, []);
 }

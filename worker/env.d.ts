@@ -51,6 +51,9 @@ declare global {
 			// Environment
 			ENVIRONMENT?: string;
 			CUSTOM_PREVIEW_DOMAIN?: string;
+
+			// Workers for Platforms (optional - only available with Workers for Platforms subscription)
+			DISPATCHER?: DispatchNamespace;
 		}
 	}
 }
