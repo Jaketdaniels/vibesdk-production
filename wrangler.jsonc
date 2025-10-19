@@ -153,12 +153,6 @@
 		"RP_ID": "netm8.com",
 		"RP_NAME": "VibeSDK",
 		"ORIGIN": "https://netm8.com",
-		"SANDBOX_SERVICE_URL": "",
-		"SANDBOX_SERVICE_API_KEY": "",
-		"CLOUDFLARE_ACCOUNT_ID": "",
-		"CLOUDFLARE_API_TOKEN": "",
-		"ALLOCATION_STRATEGY": "MANY_TO_ONE",
-		"USE_TUNNEL_FOR_PREVIEW": "false",
 		"ENVIRONMENT": "production"
 	},
 	"workers_dev": false,

@@ -13,10 +13,17 @@ declare global {
 			CLOUDFLARE_AI_GATEWAY_URL?: string;
 			CLOUDFLARE_AI_GATEWAY_TOKEN?: string;
 
-			// Sandbox Service
+			// AI Provider API Keys
+			GOOGLE_AI_STUDIO_API_KEY?: string;
+			ANTHROPIC_API_KEY?: string;
+			OPENAI_API_KEY?: string;
+			SERPAPI_KEY?: string;
+
+			// Sandbox Service (override literal types from wrangler.jsonc)
 			SANDBOX_SERVICE_URL?: string;
 			SANDBOX_SERVICE_API_KEY?: string;
-			ALLOCATION_STRATEGY?: string;
+			SANDBOX_SERVICE_TYPE?: string;
+			ALLOCATION_STRATEGY?: 'many_to_one' | 'one_to_one' | string;
 			USE_TUNNEL_FOR_PREVIEW?: string;
 
 			// OAuth Providers

@@ -39,8 +39,8 @@ export class ResourceProvisioner {
 
     constructor(logger: StructuredLogger) {
         this.logger = logger;
-        this.accountId = env.CLOUDFLARE_ACCOUNT_ID;
-        this.apiToken = env.CLOUDFLARE_API_TOKEN;
+        this.accountId = env.CLOUDFLARE_ACCOUNT_ID || '';
+        this.apiToken = env.CLOUDFLARE_API_TOKEN || '';
         
         if (!this.accountId || !this.apiToken) {
             this.logger.error('Missing required environment variables for resource provisioning', {

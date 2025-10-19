@@ -18,11 +18,11 @@ export class JWTUtils {
         this.jwtSecret = new TextEncoder().encode(jwtSecret);
     }
 
-    static getInstance(env: { JWT_SECRET: string }): JWTUtils {
+    static getInstance(env: { JWT_SECRET?: string }): JWTUtils {
         if (!env.JWT_SECRET) {
             throw new Error('JWT_SECRET not configured');
         }
-        
+
         if (!JWTUtils.instance) {
             JWTUtils.instance = new JWTUtils(env.JWT_SECRET);
         }

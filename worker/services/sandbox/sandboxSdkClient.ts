@@ -110,7 +110,7 @@ export class SandboxSdkClient extends BaseSandboxService {
     private metadataCache = new Map<string, InstanceMetadata>();
 
     constructor(sandboxId: string, agentId: string) {
-        if (env.ALLOCATION_STRATEGY === AllocationStrategy.MANY_TO_ONE) {
+        if (env.ALLOCATION_STRATEGY === 'many_to_one') {
             sandboxId = getAutoAllocatedSandbox(sandboxId);
         }
         super(sandboxId);
