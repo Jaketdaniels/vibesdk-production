@@ -1998,7 +1998,9 @@ class CloudflareDeploymentManager {
 					this.restoreDockerfileARM64Flags(originalDockerfileContent);
 				}
 
-				this.logger.deploymentSuccess(customDomain || 'your-domain.workers.dev');
+				this.logger.buildSuccess();
+				console.log(`\nDeployment completed successfully!`);
+				console.log(`Your application is now live at: ${customDomain || 'your-domain.workers.dev'}\n`);
 			} else {
 				throw new DeploymentError('Deployment failed during wrangler deploy or secret update');
 			}
@@ -2010,7 +2012,7 @@ class CloudflareDeploymentManager {
 				? error.message + (error.cause ? `\nCaused by: ${error.cause.message}` : '')
 				: String(error);
 
-			this.logger.deploymentFailure(errorMessage);
+			this.logger.buildFailure(errorMessage);
 			process.exit(1);
 		} finally {
 			// Always restore ARM64 flags if they were removed, even on deployment failure

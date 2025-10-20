@@ -32,6 +32,38 @@ import { createObjectLogger } from '../../logger';
 import { env } from 'cloudflare:workers'
 import { BaseSandboxService } from './BaseSandboxService';
 
+/**
+ * In-memory cache for templates to avoid repeated R2 fetches
+ * This cache persists for the lifetime of the Worker instance
+ */
+class TemplateCache {
+    private static cache = new Map<string, ArrayBuffer>();
+    private static readonly MAX_CACHE_SIZE = 50; // Maximum number of templates to cache
+
+    static get(key: string): ArrayBuffer | undefined {
+        return this.cache.get(key);
+    }
+
+    static set(key: string, value: ArrayBuffer): void {
+        // Simple LRU: if cache is full, remove oldest entry
+        if (this.cache.size >= this.MAX_CACHE_SIZE) {
+            const firstKey = this.cache.keys().next().value;
+            if (firstKey) {
+                this.cache.delete(firstKey);
+            }
+        }
+        this.cache.set(key, value);
+    }
+
+    static clear(): void {
+        this.cache.clear();
+    }
+
+    static size(): number {
+        return this.cache.size;
+    }
+}
+
 import { 
     buildDeploymentConfig, 
     parseWranglerConfig, 
@@ -238,18 +270,30 @@ export class SandboxSdkClient extends BaseSandboxService {
     }
 
     async downloadTemplate(templateName: string, downloadDir?: string) : Promise<ArrayBuffer> {
-        // Fetch the zip file from R2
         const downloadUrl = downloadDir ? `${downloadDir}/${templateName}.zip` : `${templateName}.zip`;
+
+        // Check in-memory cache first
+        const cached = TemplateCache.get(downloadUrl);
+        if (cached) {
+            this.logger.info(`Using cached template: ${downloadUrl} (${cached.byteLength} bytes)`);
+            return cached;
+        }
+
+        // Fetch the zip file from R2
         this.logger.info(`Fetching object: ${downloadUrl} from R2 bucket`);
         const r2Object = await env.TEMPLATES_BUCKET.get(downloadUrl);
-          
+
         if (!r2Object) {
             throw new Error(`Object '${downloadUrl}' not found in bucket`);
         }
-    
+
         const zipData = await r2Object.arrayBuffer();
-    
+
         this.logger.info(`Downloaded zip file (${zipData.byteLength} bytes)`);
+
+        // Cache the template in memory for future use
+        TemplateCache.set(downloadUrl, zipData);
+
         return zipData;
     }
 
