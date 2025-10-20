@@ -1,5 +1,5 @@
 /**
- * Passkey Authentication Routes (fix challenge structure + CSRF-friendly)
+ * Passkey Authentication Routes (fix Uint8Array typing for simplewebauthn)
  */
 
 import { Hono } from 'hono';
@@ -35,7 +35,12 @@ const authVerifySchema = z.object({
 
 const CHALLENGE_TTL_SECONDS = 300;
 
-function randomBytes(size = 32): Uint8Array { const b = new Uint8Array(size); crypto.getRandomValues(b); return b; }
+function randomBytes(size = 32): Uint8Array<ArrayBuffer> {
+  // Force the generic parameter to ArrayBuffer to satisfy simplewebauthn types
+  const buf = new Uint8Array(size) as Uint8Array<ArrayBuffer>;
+  crypto.getRandomValues(buf as unknown as Uint8Array);
+  return buf;
+}
 function regKey(ch: string): string { return `reg:${ch}`; }
 function authKey(ch: string): string { return `auth:${ch}`; }
 async function kvPut(kv: KVNamespace, key: string, value: string, ttl = CHALLENGE_TTL_SECONDS) { await kv.put(key, value, { expirationTtl: ttl }); }
@@ -64,9 +69,8 @@ app.post('/register/options', zValidator('json', regOptionsSchema), async (c) =>
     let user = await findUserByEmail(env, email);
     let userId = user?.id ?? crypto.randomUUID();
 
-    // Create raw binary challenge for options and a b64url-encoded copy for verify payload
     const challengeBytes = randomBytes(32);
-    const challengeB64 = isoBase64URL.fromBuffer(challengeBytes);
+    const challengeB64 = isoBase64URL.fromBuffer(challengeBytes as unknown as Uint8Array<ArrayBuffer>);
 
     await kvPut(env.WEBAUTHN_CHALLENGES, regKey(challengeB64), JSON.stringify({ userId, challenge: challengeB64 }));
 
@@ -78,7 +82,7 @@ app.post('/register/options', zValidator('json', regOptionsSchema), async (c) =>
       userID: isoUint8Array.fromUTF8String(userId),
       userName: email,
       userDisplayName: email,
-      challenge: challengeBytes, // raw bytes as expected by simplewebauthn
+      challenge: challengeBytes as unknown as Uint8Array<ArrayBuffer>,
       attestationType: 'none',
       authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' },
       excludeCredentials,
@@ -119,11 +123,11 @@ app.post('/auth/options', async (c) => {
   try {
     const env = c.env as unknown as Env;
     const challengeBytes = randomBytes(32);
-    const challengeB64 = isoBase64URL.fromBuffer(challengeBytes);
+    const challengeB64 = isoBase64URL.fromBuffer(challengeBytes as unknown as Uint8Array<ArrayBuffer>);
 
     await kvPut(env.WEBAUTHN_CHALLENGES, authKey(challengeB64), challengeB64);
 
-    const options = await generateAuthenticationOptions({ rpID: env.RP_ID, challenge: challengeBytes, userVerification: 'preferred' });
+    const options = await generateAuthenticationOptions({ rpID: env.RP_ID, challenge: challengeBytes as unknown as Uint8Array<ArrayBuffer>, userVerification: 'preferred' });
 
     return c.json({ success: true, data: { options, challenge: challengeB64 } });
   } catch (e) { logger.error('auth/options', e); return c.json({ success: false, error: 'Failed to generate authentication options' }, 500); }
