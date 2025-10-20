@@ -1,20 +1,25 @@
-import ora, { Ora } from 'ora';
 import pc from 'picocolors';
 
 /**
- * Modern, professional build logger with static spinners and in-place updates
- * Uses ora for elegant terminal spinners and grouped output sections
+ * Minimal, professional build logger - 2025 CLI best practices
+ * ASCII-only output with static spinners and clean formatting
+ * Inspired by Turborepo, Vercel CLI, and Next.js
  */
 export class BuildLogger {
-	private spinner: Ora | null = null;
-	private stepStartTime: number = 0;
-	private deploymentStartTime: number;
 	private currentStep: number = 0;
 	private totalSteps: number = 0;
+	private stepStartTime: number = 0;
+	private buildStartTime: number;
+	private spinnerFrames = ['|', '/', '-', '\\'];
+	private spinnerIndex = 0;
+	private spinnerInterval: NodeJS.Timeout | null = null;
+	private currentMessage: string = '';
+	private isCI: boolean;
 
 	constructor(totalSteps: number = 8) {
-		this.deploymentStartTime = Date.now();
+		this.buildStartTime = Date.now();
 		this.totalSteps = totalSteps;
+		this.isCI = process.env.CI === 'true' || !process.stdout.isTTY;
 	}
 
 	/**
@@ -23,27 +28,54 @@ export class BuildLogger {
 	startStep(message: string): void {
 		this.currentStep++;
 		this.stepStartTime = Date.now();
+		this.currentMessage = message;
 
-		// Stop previous spinner if exists
-		if (this.spinner) {
-			this.spinner.stop();
+		const prefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
+
+		if (this.isCI) {
+			// CI environment: Just print the line
+			process.stdout.write(`${prefix} ${message}...\n`);
+		} else {
+			// Interactive terminal: Use spinner
+			this.startSpinner();
+			this.updateSpinner();
 		}
-
-		const stepPrefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
-		this.spinner = ora({
-			text: `${stepPrefix} ${message}`,
-			spinner: 'dots',
-			color: 'cyan',
-		}).start();
 	}
 
 	/**
-	 * Update the current spinner text
+	 * Start the spinner animation
 	 */
-	updateStep(message: string): void {
-		if (this.spinner) {
-			const stepPrefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
-			this.spinner.text = `${stepPrefix} ${message}`;
+	private startSpinner(): void {
+		if (this.spinnerInterval) {
+			clearInterval(this.spinnerInterval);
+		}
+
+		this.spinnerInterval = setInterval(() => {
+			this.spinnerIndex = (this.spinnerIndex + 1) % this.spinnerFrames.length;
+			this.updateSpinner();
+		}, 80);
+	}
+
+	/**
+	 * Update the spinner display
+	 */
+	private updateSpinner(): void {
+		if (this.isCI) return;
+
+		const spinner = pc.cyan(this.spinnerFrames[this.spinnerIndex]);
+		const prefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
+
+		// Clear line and write new content
+		process.stdout.write(`\r\x1b[K${spinner} ${prefix} ${this.currentMessage}`);
+	}
+
+	/**
+	 * Stop the spinner
+	 */
+	private stopSpinner(): void {
+		if (this.spinnerInterval) {
+			clearInterval(this.spinnerInterval);
+			this.spinnerInterval = null;
 		}
 	}
 
@@ -51,13 +83,18 @@ export class BuildLogger {
 	 * Complete the current step successfully
 	 */
 	completeStep(message?: string): void {
-		if (this.spinner) {
-			const duration = this.formatDuration(Date.now() - this.stepStartTime);
-			const stepPrefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
-			const finalMessage = message || this.spinner.text.replace(stepPrefix, '').trim();
+		this.stopSpinner();
 
-			this.spinner.succeed(`${stepPrefix} ${finalMessage} ${pc.dim(`(${duration})`)}`);
-			this.spinner = null;
+		const duration = this.formatDuration(Date.now() - this.stepStartTime);
+		const prefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
+		const finalMessage = message || this.currentMessage;
+		const check = pc.green('>');
+
+		if (this.isCI) {
+			process.stdout.write(`${prefix} ${finalMessage} ${pc.dim(duration)}\n`);
+		} else {
+			// Clear the spinner line and write the completion
+			process.stdout.write(`\r\x1b[K${check} ${prefix} ${finalMessage} ${pc.dim(duration)}\n`);
 		}
 	}
 
@@ -65,114 +102,58 @@ export class BuildLogger {
 	 * Mark the current step as failed
 	 */
 	failStep(message: string, error?: Error): void {
-		if (this.spinner) {
-			const stepPrefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
-			this.spinner.fail(`${stepPrefix} ${message}`);
+		this.stopSpinner();
 
-			if (error) {
-				console.error(pc.dim(`   ${error.message}`));
-			}
+		const prefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
+		const cross = pc.red('x');
 
-			this.spinner = null;
+		if (this.isCI) {
+			process.stderr.write(`${prefix} ${message}\n`);
+		} else {
+			process.stderr.write(`\r\x1b[K${cross} ${prefix} ${message}\n`);
 		}
-	}
 
-	/**
-	 * Skip the current step with a warning
-	 */
-	skipStep(message: string, reason?: string): void {
-		if (this.spinner) {
-			const stepPrefix = pc.dim(`[${this.currentStep}/${this.totalSteps}]`);
-			this.spinner.warn(`${stepPrefix} ${message}`);
-
-			if (reason) {
-				console.log(pc.dim(`   ${reason}`));
-			}
-
-			this.spinner = null;
+		if (error) {
+			console.error(pc.dim(`   ${error.message}`));
 		}
-	}
-
-	/**
-	 * Log an info message without spinner
-	 */
-	info(message: string, indent: boolean = false): void {
-		const prefix = indent ? '   ' : '';
-		console.log(`${prefix}${pc.blue('ℹ')} ${pc.dim(message)}`);
-	}
-
-	/**
-	 * Log a success message without spinner
-	 */
-	success(message: string, indent: boolean = false): void {
-		const prefix = indent ? '   ' : '';
-		console.log(`${prefix}${pc.green('✓')} ${message}`);
-	}
-
-	/**
-	 * Log a warning message without spinner
-	 */
-	warn(message: string, indent: boolean = false): void {
-		const prefix = indent ? '   ' : '';
-		console.log(`${prefix}${pc.yellow('⚠')} ${message}`);
-	}
-
-	/**
-	 * Log an error message without spinner
-	 */
-	error(message: string, indent: boolean = false): void {
-		const prefix = indent ? '   ' : '';
-		console.error(`${prefix}${pc.red('✖')} ${message}`);
 	}
 
 	/**
 	 * Log section header
 	 */
-	section(title: string): void {
-		console.log(`\n${pc.cyan(pc.bold(title))}`);
-	}
-
-	/**
-	 * Log deployment summary header
-	 */
 	header(message: string): void {
-		const line = '─'.repeat(60);
-		console.log(`\n${pc.cyan(line)}`);
-		console.log(pc.cyan(pc.bold(message)));
-		console.log(`${pc.cyan(line)}\n`);
+		const width = 60;
+		const padding = Math.max(0, Math.floor((width - message.length - 2) / 2));
+		const line = '-'.repeat(width);
+
+		console.log(`\n${pc.dim(line)}`);
+		console.log(`${' '.repeat(padding)}${pc.bold(message)}`);
+		console.log(`${pc.dim(line)}\n`);
 	}
 
 	/**
-	 * Log final deployment success
+	 * Log build success
 	 */
-	deploymentSuccess(domain: string): void {
-		const totalDuration = this.formatDuration(Date.now() - this.deploymentStartTime);
-		const line = '═'.repeat(60);
+	buildSuccess(): void {
+		const totalDuration = this.formatDuration(Date.now() - this.buildStartTime);
+		const line = '='.repeat(60);
 
-		console.log(`\n${pc.green(line)}`);
-		console.log(pc.green(pc.bold('🎉 Deployment Successful!')));
-		console.log(pc.green(line));
-		console.log(`\n${pc.bold('Live at:')} ${pc.cyan(pc.underline(`https://${domain}`))}`);
-		console.log(`${pc.dim('Duration:')} ${totalDuration}\n`);
+		console.log(`\n${pc.dim(line)}`);
+		console.log(`${pc.green('>')} ${pc.bold('Build completed')} ${pc.dim(totalDuration)}`);
+		console.log(`${pc.dim(line)}\n`);
 	}
 
 	/**
-	 * Log final deployment failure
+	 * Log build failure
 	 */
-	deploymentFailure(error: string): void {
-		const line = '═'.repeat(60);
+	buildFailure(error: string): void {
+		const line = '='.repeat(60);
 
-		console.error(`\n${pc.red(line)}`);
-		console.error(pc.red(pc.bold('✖ Deployment Failed')));
-		console.error(`${pc.red(line)}\n`);
+		console.error(`\n${pc.dim(line)}`);
+		console.error(`${pc.red('x')} ${pc.bold('Build failed')}`);
+		console.error(`${pc.dim(line)}\n`);
 		console.error(pc.red(error));
-
-		console.error(`\n${pc.bold('Troubleshooting:')}`);
-		console.error(pc.dim('  • Verify all environment variables are set correctly'));
-		console.error(pc.dim('  • Check Cloudflare API token permissions'));
-		console.error(pc.dim('  • Ensure Workers for Platforms is enabled'));
-		console.error(pc.dim('  • Verify templates repository accessibility'));
-		console.error(pc.dim('  • Confirm bun and build tools are installed\n'));
+		console.error();
 	}
 
 	/**
@@ -194,9 +175,6 @@ export class BuildLogger {
 	 * Stop any active spinner (cleanup)
 	 */
 	stop(): void {
-		if (this.spinner) {
-			this.spinner.stop();
-			this.spinner = null;
-		}
+		this.stopSpinner();
 	}
 }
