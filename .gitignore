@@ -78,3 +78,6 @@ drizzle.config.*.ts
 # Container files
 SandboxDockerfile
 container/
+
+/logs
+.cursor

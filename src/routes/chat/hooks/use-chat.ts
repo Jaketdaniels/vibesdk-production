@@ -241,21 +241,19 @@ export function useChat({
 		await new Promise(resolve => setTimeout(resolve, THROTTLE_MS));
 	}, [handleWebSocketMessage]);
 
-	const processQueue = useCallback(() => {
+	const processQueue = useCallback((ws: WebSocket) => {
 		if (processing.current || messageQueue.current.length === 0) return;
 
 		processing.current = true;
 		const message = messageQueue.current.shift()!;
 
-		if (websocket) {
-			processMessage(websocket, message).then(() => {
-				processing.current = false;
-				if (messageQueue.current.length > 0) {
-					processQueue();
-				}
-			});
-		}
-	}, [processMessage, websocket]);
+		processMessage(ws, message).then(() => {
+			processing.current = false;
+			if (messageQueue.current.length > 0) {
+				processQueue(ws);
+			}
+		});
+	}, [processMessage]);
 
 	// WebSocket connection with retry logic
 	const connectWithRetry = useCallback(
@@ -329,7 +327,7 @@ export function useChat({
 					try {
 						const message: WebSocketMessage = JSON.parse(event.data);
 						messageQueue.current.push(message);
-						processQueue();
+						processQueue(ws);
 					} catch (parseError) {
 						logger.error('❌ Error parsing WebSocket message:', parseError, event.data);
 					}

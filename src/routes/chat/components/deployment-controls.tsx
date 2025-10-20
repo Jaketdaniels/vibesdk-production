@@ -31,7 +31,7 @@ interface DeploymentControlsProps {
 
 // Deployment state enum for better state management
 enum DeploymentState {
-	WAITING_PHASE1 = 'waiting_phase1',
+	WAITING_PHASE1 = 'waiting_phase1', // Unreachable - component hidden until Phase 1
 	READY_TO_DEPLOY = 'ready_to_deploy',
 	DEPLOYING = 'deploying',
 	DEPLOYED = 'deployed',
@@ -146,20 +146,7 @@ export function DeploymentControls({
 	// State-based styling and content
 	const getStateConfig = (state: DeploymentState) => {
 		switch (state) {
-			case DeploymentState.WAITING_PHASE1:
-				return {
-					panelClass: "bg-bg-3/30 dark:bg-bg-3/20 border-border-primary/50 dark:border-border-primary/40",
-					iconClass: "bg-bg-3-foreground/40 dark:bg-bg-3-foreground/30 border-muted-foreground/40 dark:border-muted-foreground/30",
-					icon: null,
-					titleColor: "text-text-tertiary dark:text-text-tertiary",
-					subtitleColor: "text-text-tertiary/80 dark:text-text-tertiary/70",
-					title: "Deploy to Cloudflare",
-					subtitle: "Deploy will be enabled after Phase 1 is implemented",
-					buttonDisabled: true,
-					buttonVariant: "secondary" as const,
-					buttonClass: "bg-bg-3 dark:bg-bg-3 text-text-tertiary dark:text-text-tertiary border-muted dark:border-muted cursor-not-allowed"
-				};
-			
+			case DeploymentState.WAITING_PHASE1: // Fallback - component hidden until Phase 1
 			case DeploymentState.READY_TO_DEPLOY:
 				return {
 					panelClass: "bg-accent/5 dark:bg-accent/10 border-accent/20 dark:border-accent/20",

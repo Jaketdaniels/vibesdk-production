@@ -578,7 +578,7 @@ export default function Chat() {
 							</motion.div>
 
 							{/* Deployment and Generation Controls */}
-							{chatId && (
+							{chatId && (isPhase1Complete || cloudflareDeploymentUrl) && (
 								<motion.div
 									ref={deploymentControlsRef}
 									initial={{ opacity: 0, y: 10 }}
