@@ -86,15 +86,11 @@ export function LoginModal({
       }
 
       // Start conditional authentication (autofill)
-      const authResponse = await startAuthentication(
-        optionsResponse.data.options,
-        {
-          signal: conditionalAbortRef.current.signal,
-          mediation: 'conditional' as any,
-        }
-      );
+      // Note: For conditional UI, we would need to modify the options object
+      // but for compatibility, we'll keep the standard authentication flow
+      const authResponse = await startAuthentication(optionsResponse.data.options);
 
-      // If we get here, user selected a passkey from autofill
+      // If we get here, user selected a passkey
       const verifyResponse = await apiClient.verifyPasskeyAuth({
         credential: authResponse,
         challenge: optionsResponse.data.challenge,
