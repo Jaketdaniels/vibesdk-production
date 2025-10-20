@@ -7,6 +7,7 @@ import { AppEnv } from '../../types/appenv';
 import { adaptController } from '../honoAdapter';
 import { AuthConfig, setAuthLevel } from '../../middleware/auth/routeAuth';
 import passkeyRoutes from '../../routes/auth/passkey';
+import passkeyManagementRoutes from '../../routes/auth/passkey-management';
 
 /**
  * Setup authentication routes
@@ -33,17 +34,15 @@ export function setupAuthRoutes(app: Hono<AppEnv>): void {
     authRouter.get('/sessions', setAuthLevel(AuthConfig.authenticated), adaptController(AuthController, AuthController.getActiveSessions));
     authRouter.delete('/sessions/:sessionId', setAuthLevel(AuthConfig.authenticated), adaptController(AuthController, AuthController.revokeSession));
     
-    // // API Keys management routes
-    // authRouter.get('/api-keys', createHandler('getApiKeys'), AuthConfig.authenticated);
-    // authRouter.post('/api-keys', createHandler('createApiKey'), AuthConfig.authenticated);
-    // authRouter.delete('/api-keys/:keyId', createHandler('revokeApiKey'), AuthConfig.authenticated);
-    
     // OAuth routes (under /oauth path to avoid conflicts)
     authRouter.get('/oauth/:provider', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.initiateOAuth));
     authRouter.get('/callback/:provider', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.handleOAuthCallback));
     
     // Passkey authentication routes (public - no auth required for registration/authentication)
     authRouter.route('/passkey', passkeyRoutes);
+
+    // Passkey management routes (authenticated)
+    authRouter.route('/passkey', passkeyManagementRoutes);
     
     // Mount the auth router under /api/auth
     app.route('/api/auth', authRouter);
