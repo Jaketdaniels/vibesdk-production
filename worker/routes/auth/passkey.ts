@@ -42,6 +42,7 @@ function randomBytes(size = 32): Uint8Array<ArrayBuffer> {
 }
 function regKey(ch: string): string { return `reg:${ch}`; }
 function authKey(ch: string): string { return `auth:${ch}`; }
+function otpKey(email: string): string { return `otp:${email.toLowerCase().trim()}`; }
 async function kvPut(kv: KVNamespace, key: string, value: string, ttl = CHALLENGE_TTL_SECONDS) { await kv.put(key, value, { expirationTtl: ttl }); }
 async function kvGet(kv: KVNamespace, key: string) { return kv.get(key); }
 async function kvDel(kv: KVNamespace, key: string) { await kv.delete(key); }
@@ -64,6 +65,17 @@ app.post('/register/options', zValidator('json', regOptionsSchema), async (c) =>
   try {
     const env = c.env as unknown as Env;
     const email = c.req.valid('json').email.trim().toLowerCase();
+
+    // Check if email has been verified via OTP
+    const otpData = await kvGet(env.WEBAUTHN_CHALLENGES, otpKey(email));
+    if (!otpData) {
+      return c.json({ success: false, error: 'Email verification required. Please verify your email first.', code: 'EMAIL_NOT_VERIFIED' }, 400);
+    }
+
+    const { verified } = JSON.parse(otpData);
+    if (!verified) {
+      return c.json({ success: false, error: 'Email not verified. Please complete email verification.', code: 'EMAIL_NOT_VERIFIED' }, 400);
+    }
 
     let user = await findUserByEmail(env, email);
     let userId = user?.id ?? crypto.randomUUID();

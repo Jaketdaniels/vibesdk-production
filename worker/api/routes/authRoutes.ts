@@ -8,6 +8,7 @@ import { adaptController } from '../honoAdapter';
 import { AuthConfig, setAuthLevel } from '../../middleware/auth/routeAuth';
 import passkeyRoutes from '../../routes/auth/passkey';
 import passkeyManagementRoutes from '../../routes/auth/passkey-management';
+import otpRoutes from '../../routes/auth/otp';
 
 /**
  * Setup authentication routes
@@ -38,12 +39,15 @@ export function setupAuthRoutes(app: Hono<AppEnv>): void {
     authRouter.get('/oauth/:provider', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.initiateOAuth));
     authRouter.get('/callback/:provider', setAuthLevel(AuthConfig.public), adaptController(AuthController, AuthController.handleOAuthCallback));
     
+    // OTP email verification routes (public)
+    authRouter.route('/otp', otpRoutes);
+
     // Passkey authentication routes (public - no auth required for registration/authentication)
     authRouter.route('/passkey', passkeyRoutes);
 
     // Passkey management routes (authenticated)
     authRouter.route('/passkey', passkeyManagementRoutes);
-    
+
     // Mount the auth router under /api/auth
     app.route('/api/auth', authRouter);
 }

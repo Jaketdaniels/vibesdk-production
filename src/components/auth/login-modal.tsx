@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertCircle, KeyRound, Fingerprint } from 'lucide-react';
+import { X, AlertCircle, KeyRound, Fingerprint, Mail } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 interface LoginModalProps {
@@ -33,6 +33,9 @@ export function LoginModal({
   const [isLoading, setIsLoading] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [email, setEmail] = useState('');
+  const [registrationStep, setRegistrationStep] = useState<'email' | 'otp' | 'passkey'>('email');
+  const [otp, setOtp] = useState('');
+  const [otpMessage, setOtpMessage] = useState('');
 
   const isValidEmail = (emailValue: string): boolean => {
     const normalized = emailValue.trim().toLowerCase();
@@ -43,6 +46,9 @@ export function LoginModal({
     if (onClearError) onClearError();
     setShowRegister(false);
     setEmail('');
+    setRegistrationStep('email');
+    setOtp('');
+    setOtpMessage('');
     onClose();
   };
 
@@ -57,16 +63,88 @@ export function LoginModal({
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
+  const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     const normalized = email.trim().toLowerCase();
-    if (!normalized || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return;
+    if (!isValidEmail(normalized)) return;
 
     setIsLoading(true);
+    setOtpMessage('');
     try {
-      await onPasskeyRegister(normalized);
+      const res = await fetch('/api/auth/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalized }),
+        credentials: 'include',
+      });
+
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (res.ok && data.success) {
+        setRegistrationStep('otp');
+        setOtpMessage('Verification code sent to your email');
+      } else {
+        setOtpMessage(data.error || 'Failed to send verification code');
+      }
     } catch (_) {
-      // Error handled in auth context
+      setOtpMessage('Network error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const normalized = email.trim().toLowerCase();
+    if (otp.length !== 6) return;
+
+    setIsLoading(true);
+    setOtpMessage('');
+    try {
+      const res = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalized, otp }),
+        credentials: 'include',
+      });
+
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (res.ok && data.success) {
+        setRegistrationStep('passkey');
+        setOtpMessage('Email verified! Creating your passkey...');
+        // Automatically trigger passkey creation
+        setTimeout(() => {
+          onPasskeyRegister(normalized);
+        }, 500);
+      } else {
+        setOtpMessage(data.error || 'Invalid verification code');
+      }
+    } catch (_) {
+      setOtpMessage('Network error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    const normalized = email.trim().toLowerCase();
+    setIsLoading(true);
+    setOtpMessage('');
+    try {
+      const res = await fetch('/api/auth/otp/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalized }),
+        credentials: 'include',
+      });
+
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (res.ok && data.success) {
+        setOtpMessage('New verification code sent');
+      } else {
+        setOtpMessage(data.error || 'Failed to resend code');
+      }
+    } catch (_) {
+      setOtpMessage('Network error. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -114,7 +192,13 @@ export function LoginModal({
                 <div className="text-center space-y-3">
                   <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                     {showRegister ? (
-                      <KeyRound className="w-7 h-7 text-primary" />
+                      registrationStep === 'email' ? (
+                        <Mail className="w-7 h-7 text-primary" />
+                      ) : registrationStep === 'otp' ? (
+                        <KeyRound className="w-7 h-7 text-primary" />
+                      ) : (
+                        <Fingerprint className="w-7 h-7 text-primary" />
+                      )
                     ) : (
                       <Fingerprint className="w-7 h-7 text-primary" />
                     )}
@@ -123,63 +207,148 @@ export function LoginModal({
                     {actionContext
                       ? `Sign in ${actionContext}`
                       : showRegister
-                      ? 'Create your passkey'
+                      ? registrationStep === 'email'
+                        ? 'Verify your email'
+                        : registrationStep === 'otp'
+                        ? 'Enter verification code'
+                        : 'Creating passkey'
                       : 'Welcome back'}
                   </h2>
                   <p className="text-text-tertiary text-sm">
                     {showRegister
-                      ? 'Enter your email to create a passkey for this account'
+                      ? registrationStep === 'email'
+                        ? 'We\'ll send a verification code to your email'
+                        : registrationStep === 'otp'
+                        ? `Code sent to ${email}`
+                        : 'Please complete the passkey setup'
                       : 'Sign in securely with your device passkey'}
                   </p>
                 </div>
               </div>
 
-              {error && (
-                <div className="mx-8 mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-2">
-                  <AlertCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 text-sm text-destructive">{error}</div>
+              {(error || otpMessage) && (
+                <div className={`mx-8 mb-4 p-3 rounded-lg flex items-start gap-2 ${
+                  otpMessage && !error
+                    ? otpMessage.includes('sent') || otpMessage.includes('verified')
+                      ? 'bg-primary/10 border border-primary/20'
+                      : 'bg-destructive/10 border border-destructive/20'
+                    : 'bg-destructive/10 border border-destructive/20'
+                }`}>
+                  <AlertCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${
+                    otpMessage && !error
+                      ? otpMessage.includes('sent') || otpMessage.includes('verified')
+                        ? 'text-primary'
+                        : 'text-destructive'
+                      : 'text-destructive'
+                  }`} />
+                  <div className={`flex-1 text-sm ${
+                    otpMessage && !error
+                      ? otpMessage.includes('sent') || otpMessage.includes('verified')
+                        ? 'text-primary'
+                        : 'text-destructive'
+                      : 'text-destructive'
+                  }`}>{error || otpMessage}</div>
                 </div>
               )}
 
               <div className="px-8 pb-8">
                 {showRegister ? (
-                  <form onSubmit={handleRegisterSubmit} className="space-y-4">
-                    <div>
-                      <input
-                        type="email"
-                        placeholder="Email address"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="w-full p-3 rounded-lg border border-border-primary bg-bg-2/50 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
-                        disabled={isLoading}
-                        required
-                      />
-                    </div>
-
-                    <motion.button
-                      type="submit"
-                      whileTap={{ scale: 0.98 }}
-                      disabled={isLoading || !isValidEmail(email)}
-                      className="w-full group relative overflow-hidden rounded-xl bg-primary p-4 text-primary-foreground transition-all hover:bg-primary/90 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
-                    >
-                      <div className="relative z-10 flex items-center justify-center gap-3">
-                        <KeyRound className="h-5 w-5" />
-                        <span className="font-medium">
-                          {isLoading ? 'Creating Passkey...' : 'Create Passkey'}
-                        </span>
+                  registrationStep === 'email' ? (
+                    <form onSubmit={handleSendOTP} className="space-y-4">
+                      <div>
+                        <input
+                          type="email"
+                          placeholder="Email address"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full p-3 rounded-lg border border-border-primary bg-bg-2/50 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
+                          disabled={isLoading}
+                          required
+                        />
                       </div>
-                      <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:translate-x-full transition-transform duration-700" />
-                    </motion.button>
 
-                    <button
-                      type="button"
-                      onClick={() => { setShowRegister(false); if (onClearError) onClearError(); }}
-                      disabled={isLoading}
-                      className="w-full text-sm text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50"
-                    >
-                      ← Back to sign in
-                    </button>
-                  </form>
+                      <motion.button
+                        type="submit"
+                        whileTap={{ scale: 0.98 }}
+                        disabled={isLoading || !isValidEmail(email)}
+                        className="w-full group relative overflow-hidden rounded-xl bg-primary p-4 text-primary-foreground transition-all hover:bg-primary/90 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
+                      >
+                        <div className="relative z-10 flex items-center justify-center gap-3">
+                          <Mail className="h-5 w-5" />
+                          <span className="font-medium">
+                            {isLoading ? 'Sending Code...' : 'Send Verification Code'}
+                          </span>
+                        </div>
+                        <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:translate-x-full transition-transform duration-700" />
+                      </motion.button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setShowRegister(false); setRegistrationStep('email'); if (onClearError) onClearError(); }}
+                        disabled={isLoading}
+                        className="w-full text-sm text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50"
+                      >
+                        ← Back to sign in
+                      </button>
+                    </form>
+                  ) : registrationStep === 'otp' ? (
+                    <form onSubmit={handleVerifyOTP} className="space-y-4">
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="______"
+                          value={otp}
+                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          maxLength={6}
+                          pattern="\d{6}"
+                          inputMode="numeric"
+                          className="w-full p-3 rounded-lg border border-border-primary bg-bg-2/50 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-2xl text-center tracking-widest font-mono"
+                          disabled={isLoading}
+                          required
+                        />
+                      </div>
+
+                      <motion.button
+                        type="submit"
+                        whileTap={{ scale: 0.98 }}
+                        disabled={isLoading || otp.length !== 6}
+                        className="w-full group relative overflow-hidden rounded-xl bg-primary p-4 text-primary-foreground transition-all hover:bg-primary/90 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
+                      >
+                        <div className="relative z-10 flex items-center justify-center gap-3">
+                          <KeyRound className="h-5 w-5" />
+                          <span className="font-medium">
+                            {isLoading ? 'Verifying...' : 'Verify Code'}
+                          </span>
+                        </div>
+                        <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:translate-x-full transition-transform duration-700" />
+                      </motion.button>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={handleResendOTP}
+                          disabled={isLoading}
+                          className="text-sm text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50"
+                        >
+                          Resend code
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setRegistrationStep('email'); setOtp(''); setOtpMessage(''); }}
+                          disabled={isLoading}
+                          className="text-sm text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50"
+                        >
+                          Change email
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="space-y-4 text-center">
+                      <p className="text-sm text-text-tertiary">
+                        Please complete the passkey setup in your browser...
+                      </p>
+                    </div>
+                  )
                 ) : (
                   <div className="space-y-4">
                     <motion.button
