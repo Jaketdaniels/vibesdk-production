@@ -71,6 +71,14 @@ export function useChat({
 	const shouldReconnectRef = useRef(true);
 	// Track the latest connection attempt to avoid handling stale socket events
 	const connectAttemptIdRef = useRef(0);
+	// Message throttling queue to prevent UI cycling from rapid messages
+	const THROTTLE_MS = 50;
+	const messageQueue = useRef<WebSocketMessage[]>([]);
+	const processing = useRef(false);
+	// Refs for stable callbacks - prevent handler recreation on array changes
+	const filesRef = useRef<FileType[]>([]);
+	const phaseTimelineRef = useRef<PhaseTimelineItem[]>([]);
+	const projectStagesRef = useRef<ProjectStage[]>([]);
 	const [chatId, setChatId] = useState<string>();
 	const [messages, setMessages] = useState<ChatMessage[]>([
 		createAIMessage('main', 'Thinking...', true),
@@ -83,8 +91,28 @@ export function useChat({
 
 	const [websocket, setWebsocket] = useState<WebSocket>();
 
-	const [isGeneratingBlueprint, setIsGeneratingBlueprint] = useState(false);
-	const [isBootstrapping, setIsBootstrapping] = useState(true);
+	// Activity state enum to prevent impossible state combinations
+	type ActivityState =
+		| { type: 'idle' }
+		| { type: 'bootstrapping' }
+		| { type: 'generating_blueprint' }
+		| { type: 'thinking_next_phase' }
+		| { type: 'implementing_phase'; phaseName: string }
+		| { type: 'validating_phase'; phaseName: string }
+		| { type: 'deploying_preview' }
+		| { type: 'paused'; pausedFrom: ActivityState }
+		| { type: 'completed' };
+
+	const [activityState, setActivityState] = useState<ActivityState>({ type: 'bootstrapping' });
+
+	// Derived flags for backward compatibility during migration
+	const isGenerating = activityState.type === 'implementing_phase' || activityState.type === 'validating_phase';
+	const isThinking = activityState.type === 'thinking_next_phase';
+	const isBootstrapping = activityState.type === 'bootstrapping';
+	const isGeneratingBlueprint = activityState.type === 'generating_blueprint';
+	const isPreviewDeploying = activityState.type === 'deploying_preview';
+	const isGenerationPaused = activityState.type === 'paused';
+	const isPhaseProgressActive = activityState.type === 'implementing_phase' || activityState.type === 'validating_phase' || activityState.type === 'thinking_next_phase';
 
 	const [projectStages, setProjectStages] = useState<ProjectStage[]>(defaultStages);
 
@@ -103,22 +131,11 @@ export function useChat({
 	const [deploymentError, setDeploymentError] = useState<string>();
 	const deploymentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-	// Preview deployment state
-	const [isPreviewDeploying, setIsPreviewDeploying] = useState(false);
-
 	// Redeployment state - tracks when redeploy button should be enabled
 	const [isRedeployReady, setIsRedeployReady] = useState(false);
-	// const [lastDeploymentPhaseCount, setLastDeploymentPhaseCount] = useState(0);
-	const [isGenerationPaused, setIsGenerationPaused] = useState(false);
-	const [isGenerating, setIsGenerating] = useState(false);
-
-	// Phase progress visual indicator (used to apply subtle throb on chat)
-	const [isPhaseProgressActive, setIsPhaseProgressActive] = useState(false);
-
-	const [isThinking, setIsThinking] = useState(false);
 	
 	// Preview refresh state - triggers preview reload after deployment
-	const [shouldRefreshPreview, setShouldRefreshPreview] = useState(false);
+	const [shouldRefreshPreview, setShouldRefreshPreview] = useState(0);
 	
 	// Track whether we've completed initial state restoration to avoid disrupting active sessions
 	const [isInitialStateRestored, setIsInitialStateRestored] = useState(false);
@@ -160,6 +177,11 @@ export function useChat({
 		]);
 	};
 
+	// Keep refs in sync with state for stable callback dependencies
+	useEffect(() => { filesRef.current = files; }, [files]);
+	useEffect(() => { phaseTimelineRef.current = phaseTimeline; }, [phaseTimeline]);
+	useEffect(() => { projectStagesRef.current = projectStages; }, [projectStages]);
+
 	// Create the WebSocket message handler
 	const handleWebSocketMessage = useCallback(
 		createWebSocketMessageHandler({
@@ -173,26 +195,22 @@ export function useChat({
 			setPreviewUrl,
 			setTotalFiles,
 			setIsRedeployReady,
-			setIsPreviewDeploying,
-			setIsThinking,
+			setActivityState,
 			setIsInitialStateRestored,
 			setShouldRefreshPreview,
 			setIsDeploying,
 			setCloudflareDeploymentUrl,
 			setDeploymentError,
-			setIsGenerationPaused,
-			setIsGenerating,
-			setIsPhaseProgressActive,
 			// Current state
 			isInitialStateRestored,
 			blueprint,
 			query,
 			bootstrapFiles,
-			files,
-			phaseTimeline,
+			getFiles: () => filesRef.current,
+			getPhaseTimeline: () => phaseTimelineRef.current,
 			previewUrl,
-			projectStages,
-			isGenerating,
+			getProjectStages: () => projectStagesRef.current,
+			activityState,
 			urlChatId,
 			// Functions
 			updateStage,
@@ -206,11 +224,8 @@ export function useChat({
 			blueprint,
 			query,
 			bootstrapFiles,
-			files,
-			phaseTimeline,
 			previewUrl,
-			projectStages,
-			isGenerating,
+			activityState,
 			urlChatId,
 			updateStage,
 			sendMessage,
@@ -219,6 +234,28 @@ export function useChat({
 			onTerminalMessage,
 		]
 	);
+
+	// Message queue processing with throttling
+	const processMessage = useCallback(async (ws: WebSocket, message: WebSocketMessage) => {
+		handleWebSocketMessage(ws, message);
+		await new Promise(resolve => setTimeout(resolve, THROTTLE_MS));
+	}, [handleWebSocketMessage]);
+
+	const processQueue = useCallback(() => {
+		if (processing.current || messageQueue.current.length === 0) return;
+
+		processing.current = true;
+		const message = messageQueue.current.shift()!;
+
+		if (websocket) {
+			processMessage(websocket, message).then(() => {
+				processing.current = false;
+				if (messageQueue.current.length > 0) {
+					processQueue();
+				}
+			});
+		}
+	}, [processMessage, websocket]);
 
 	// WebSocket connection with retry logic
 	const connectWithRetry = useCallback(
@@ -291,7 +328,8 @@ export function useChat({
 				ws.addEventListener('message', (event) => {
 					try {
 						const message: WebSocketMessage = JSON.parse(event.data);
-						handleWebSocketMessage(ws, message);
+						messageQueue.current.push(message);
+						processQueue();
 					} catch (parseError) {
 						logger.error('❌ Error parsing WebSocket message:', parseError, event.data);
 					}
@@ -423,8 +461,7 @@ export function useChat({
 							if (!startedBlueprintStream) {
 								sendMessage(createAIMessage('main', 'Blueprint is being generated...', true));
 								logger.info('Blueprint stream has started');
-								setIsBootstrapping(false);
-								setIsGeneratingBlueprint(true);
+								setActivityState({ type: 'generating_blueprint' });
 								startedBlueprintStream = true;
 								updateStage('bootstrap', { status: 'completed' });
 								updateStage('blueprint', { status: 'active' });
@@ -454,7 +491,7 @@ export function useChat({
 					}
 
 					updateStage('blueprint', { status: 'completed' });
-					setIsGeneratingBlueprint(false);
+					setActivityState({ type: 'idle' });
 					sendMessage(createAIMessage('main', 'Blueprint generation complete. Now starting the code generation...', true));
 
 					// Connect to WebSocket
@@ -468,7 +505,7 @@ export function useChat({
 						description: userQuery,
 					});
 				} else if (connectionStatus.current === 'idle') {
-					setIsBootstrapping(false);
+					setActivityState({ type: 'idle' });
 					// Get existing progress
 					sendMessage(createAIMessage('fetching-chat', 'Fetching your previous chat...'));
 

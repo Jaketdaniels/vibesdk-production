@@ -6,7 +6,7 @@ interface PreviewIframeProps {
     src: string;
     className?: string;
     title?: string;
-    shouldRefreshPreview?: boolean;
+    shouldRefreshPreview?: number;
     manualRefreshTrigger?: number;
     webSocket?: WebSocket | null;
 }
@@ -38,7 +38,7 @@ const getRetryDelay = (attempt: number): number => {
 // ============================================================================
 
 export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
-	({ src, className = '', title = 'Preview', shouldRefreshPreview = false, manualRefreshTrigger, webSocket }, ref) => {
+	({ src, className = '', title = 'Preview', shouldRefreshPreview = 0, manualRefreshTrigger, webSocket }, ref) => {
 		
 		const [loadState, setLoadState] = useState<LoadState>({
 			status: 'idle',

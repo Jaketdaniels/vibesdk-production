@@ -22,6 +22,18 @@ import { sendWebSocketMessage } from './websocket-helpers';
 import type { FileType, PhaseTimelineItem } from '../hooks/use-chat';
 import { toast } from 'sonner';
 
+// Activity state type definition
+type ActivityState =
+    | { type: 'idle' }
+    | { type: 'bootstrapping' }
+    | { type: 'generating_blueprint' }
+    | { type: 'thinking_next_phase' }
+    | { type: 'implementing_phase'; phaseName: string }
+    | { type: 'validating_phase'; phaseName: string }
+    | { type: 'deploying_preview' }
+    | { type: 'paused'; pausedFrom: ActivityState }
+    | { type: 'completed' };
+
 export interface HandleMessageDeps {
     // State setters
     setFiles: React.Dispatch<React.SetStateAction<FileType[]>>;
@@ -33,27 +45,23 @@ export interface HandleMessageDeps {
     setPreviewUrl: React.Dispatch<React.SetStateAction<string | undefined>>;
     setTotalFiles: React.Dispatch<React.SetStateAction<number | undefined>>;
     setIsRedeployReady: React.Dispatch<React.SetStateAction<boolean>>;
-    setIsPreviewDeploying: React.Dispatch<React.SetStateAction<boolean>>;
-    setIsThinking: React.Dispatch<React.SetStateAction<boolean>>;
+    setActivityState: React.Dispatch<React.SetStateAction<ActivityState>>;
     setIsInitialStateRestored: React.Dispatch<React.SetStateAction<boolean>>;
-    setShouldRefreshPreview: React.Dispatch<React.SetStateAction<boolean>>;
+    setShouldRefreshPreview: React.Dispatch<React.SetStateAction<number>>;
     setIsDeploying: React.Dispatch<React.SetStateAction<boolean>>;
     setCloudflareDeploymentUrl: React.Dispatch<React.SetStateAction<string>>;
     setDeploymentError: React.Dispatch<React.SetStateAction<string | undefined>>;
-    setIsGenerationPaused: React.Dispatch<React.SetStateAction<boolean>>;
-    setIsGenerating: React.Dispatch<React.SetStateAction<boolean>>;
-    setIsPhaseProgressActive: React.Dispatch<React.SetStateAction<boolean>>;
-    
+
     // Current state
     isInitialStateRestored: boolean;
     blueprint: BlueprintType | undefined;
     query: string | undefined;
     bootstrapFiles: FileType[];
-    files: FileType[];
-    phaseTimeline: PhaseTimelineItem[];
+    getFiles: () => FileType[];
+    getPhaseTimeline: () => PhaseTimelineItem[];
     previewUrl: string | undefined;
-    projectStages: any[];
-    isGenerating: boolean;
+    getProjectStages: () => any[];
+    activityState: ActivityState;
     urlChatId: string | undefined;
     
     // Functions
@@ -100,25 +108,21 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
             setPreviewUrl,
             setTotalFiles,
             setIsRedeployReady,
-            setIsPreviewDeploying,
-            setIsThinking,
+            setActivityState,
             setIsInitialStateRestored,
             setShouldRefreshPreview,
             setIsDeploying,
             setCloudflareDeploymentUrl,
             setDeploymentError,
-            setIsGenerationPaused,
-            setIsGenerating,
-            setIsPhaseProgressActive,
             isInitialStateRestored,
             blueprint,
             query,
             bootstrapFiles,
-            files,
-            phaseTimeline,
+            getFiles,
+            getPhaseTimeline,
             previewUrl,
-            projectStages,
-            isGenerating,
+            getProjectStages,
+            activityState,
             urlChatId,
             updateStage,
             sendMessage,
@@ -126,6 +130,58 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
             onDebugMessage,
             onTerminalMessage,
         } = deps;
+
+        // Derived activity flags from activityState
+        const isGenerating = activityState.type === 'implementing_phase' || activityState.type === 'validating_phase';
+
+        // Phase gate validation helper
+        const validatePhaseMessage = (
+            messageType: string,
+            currentState: {
+                blueprint?: BlueprintType;
+                files: FileType[];
+                projectStages: any[];
+            }
+        ): { valid: boolean; reason?: string } => {
+            switch (messageType) {
+                case 'generation_started':
+                    if (!currentState.blueprint) {
+                        return { valid: false, reason: 'No blueprint exists' };
+                    }
+                    break;
+
+                case 'phase_validating':
+                    if (currentState.files.length === 0) {
+                        return { valid: false, reason: 'No files to validate' };
+                    }
+                    break;
+
+                case 'phase_implemented':
+                    const generating = currentState.files.filter(f => f.isGenerating);
+                    if (generating.length > 0) {
+                        return { valid: false, reason: `${generating.length} files still generating` };
+                    }
+                    break;
+            }
+
+            return { valid: true };
+        };
+
+        // Validate phase messages before processing
+        const PHASE_MESSAGES = ['generation_started', 'phase_validating', 'phase_validated', 'phase_implemented'];
+
+        if (PHASE_MESSAGES.includes(message.type)) {
+            const validation = validatePhaseMessage(message.type, {
+                blueprint: blueprint,
+                files: getFiles(),
+                projectStages: getProjectStages()
+            });
+
+            if (!validation.valid) {
+                logger.warn(`Rejected premature message: ${message.type} - ${validation.reason}`);
+                return;
+            }
+        }
 
         // Log messages except for frequent ones
         if (message.type !== 'file_chunk_generated' && message.type !== 'cf_agent_state' && message.type.length <= 50) {
@@ -146,7 +202,12 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
 
                 if (!isInitialStateRestored) {
                     logger.debug('📥 Performing initial state restoration');
-                    
+
+                    // Get current state using getters (Task 4: Stable Callback Dependencies)
+                    const currentFiles = getFiles();
+                    const currentTimeline = getPhaseTimeline();
+                    const currentStages = getProjectStages();
+
                     if (state.blueprint && !blueprint) {
                         setBlueprint(state.blueprint);
                         updateStage('blueprint', { status: 'completed' });
@@ -160,7 +221,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                         loadBootstrapFiles(state.templateDetails.files);
                     }
 
-                    if (state.generatedFilesMap && files.length === 0) {
+                    if (state.generatedFilesMap && currentFiles.length === 0) {
                         setFiles(
                             Object.values(state.generatedFilesMap).map((file: any) => ({
                                 filePath: file.filePath,
@@ -173,7 +234,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                         );
                     }
 
-                    if (state.generatedPhases && state.generatedPhases.length > 0 && phaseTimeline.length === 0) {
+                    if (state.generatedPhases && state.generatedPhases.length > 0 && currentTimeline.length === 0) {
                         logger.debug('📋 Restoring phase timeline:', state.generatedPhases);
                         const timeline = state.generatedPhases.map((phase: any, index: number) => ({
                             id: `phase-${index}`,
@@ -221,7 +282,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                     logger.debug('📡 Sending auto-resume generate_all message');
                     sendWebSocketMessage(websocket, 'generate_all');
                 } else {
-                    const codeStage = projectStages.find((stage: any) => stage.id === 'code');
+                    const codeStage = getProjectStages().find((stage: any) => stage.id === 'code');
                     if (codeStage?.status === 'active' && !isGenerating) {
                         if (state.generatedFilesMap && Object.keys(state.generatedFilesMap).length > 0) {
                             updateStage('code', { status: 'completed' });
@@ -309,6 +370,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
             case 'generation_started': {
                 updateStage('code', { status: 'active' });
                 setTotalFiles(message.totalFiles);
+                setActivityState({ type: 'idle' });
                 break;
             }
 
@@ -318,17 +380,17 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                 setProjectStages((prev) => completeStages(prev, ['code', 'validate', 'fix']));
 
                 sendMessage(createAIMessage('generation-complete', 'Code generation has been completed.'));
-                setIsPhaseProgressActive(false);
+                setActivityState({ type: 'completed' });
                 break;
             }
 
             case 'deployment_started': {
-                setIsPreviewDeploying(true);
+                setActivityState({ type: 'deploying_preview' });
                 break;
             }
 
             case 'deployment_completed': {
-                setIsPreviewDeploying(false);
+                setActivityState({ type: 'completed' });
                 const finalPreviewURL = getPreviewUrl(message.previewURL, message.tunnelURL);
                 setPreviewUrl(finalPreviewURL);
                 break;
@@ -336,6 +398,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
 
             case 'deployment_failed': {
                 toast.error(`Error: ${message.message}`);
+                setActivityState({ type: 'idle' });
                 break;
             }
 
@@ -397,30 +460,29 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                 updateStage('validate', { status: 'completed' });
                 updateStage('fix', { status: 'completed' });
                 sendMessage(createAIMessage('phase_generating', message.message));
-                setIsThinking(true);
-                setIsPhaseProgressActive(true);
+                setActivityState({ type: 'thinking_next_phase' });
                 break;
             }
 
             case 'phase_generated': {
                 sendMessage(createAIMessage('phase_generated', message.message));
-                setIsThinking(false);
-                setIsPhaseProgressActive(false);
+                setActivityState({ type: 'idle' });
                 break;
             }
 
             case 'phase_implementing': {
                 sendMessage(createAIMessage('phase_implementing', message.message));
                 updateStage('code', { status: 'active' });
-                
+
                 if (message.phase) {
+                    setActivityState({ type: 'implementing_phase', phaseName: message.phase.name });
                     setPhaseTimeline(prev => {
                         const existingPhase = prev.find(p => p.name === message.phase.name);
                         if (existingPhase) {
                             logger.debug('Phase already exists in timeline:', message.phase.name);
                             return prev;
                         }
-                        
+
                         const newPhase = {
                             id: `${message.phase.name}-${Date.now()}`,
                             name: message.phase.name,
@@ -433,7 +495,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                             status: 'generating' as const,
                             timestamp: Date.now()
                         };
-                        
+
                         logger.debug('Added new phase to timeline:', message.phase.name);
                         return [...prev, newPhase];
                     });
@@ -444,24 +506,29 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
             case 'phase_validating': {
                 sendMessage(createAIMessage('phase_validating', message.message));
                 updateStage('validate', { status: 'active' });
-                
+
+                const timeline = getPhaseTimeline();
+                if (timeline.length > 0) {
+                    const lastPhase = timeline[timeline.length - 1];
+                    logger.debug(`Phase validating: ${lastPhase.name}`);
+                    setActivityState({ type: 'validating_phase', phaseName: lastPhase.name });
+                }
+
                 setPhaseTimeline(prev => {
                     const updated = [...prev];
                     if (updated.length > 0) {
                         const lastPhase = updated[updated.length - 1];
                         lastPhase.status = 'validating';
-                        logger.debug(`Phase validating: ${lastPhase.name}`);
                     }
                     return updated;
                 });
-                setIsPreviewDeploying(false);
-                setIsPhaseProgressActive(false);
                 break;
             }
 
             case 'phase_validated': {
                 sendMessage(createAIMessage('phase_validated', message.message));
                 updateStage('validate', { status: 'completed' });
+                setActivityState({ type: 'idle' });
                 break;
             }
 
@@ -470,7 +537,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
 
                 updateStage('code', { status: 'completed' });
                 setIsRedeployReady(true);
-                setIsPhaseProgressActive(false);
+                setActivityState({ type: 'idle' });
                 
                 if (message.phase) {
                     setPhaseTimeline(prev => {
@@ -488,12 +555,8 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                 logger.debug('🔄 Scheduling preview refresh in 1 second after deployment completion');
                 setTimeout(() => {
                     logger.debug('🔄 Triggering preview refresh after deployment completion');
-                    setShouldRefreshPreview(true);
-                    
-                    setTimeout(() => {
-                        setShouldRefreshPreview(false);
-                    }, 100);
-                    
+                    setShouldRefreshPreview(prev => prev + 1);
+
                     onDebugMessage?.('info',
                         'Preview Auto-Refresh Triggered',
                         `Preview refreshed 1 second after deployment completion`,
@@ -504,15 +567,15 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
             }
 
             case 'generation_stopped': {
-                setIsGenerating(false);
-                setIsGenerationPaused(true);
+                setActivityState(prev => ({ type: 'paused', pausedFrom: prev }));
                 sendMessage(createAIMessage('generation_stopped', message.message));
                 break;
             }
 
             case 'generation_resumed': {
-                setIsGenerating(true);
-                setIsGenerationPaused(false);
+                setActivityState(prev =>
+                    prev.type === 'paused' ? prev.pausedFrom : { type: 'implementing_phase', phaseName: 'resumed' }
+                );
                 sendMessage(createAIMessage('generation_resumed', message.message));
                 break;
             }
@@ -531,9 +594,9 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                 
                 sendMessage(createAIMessage('cloudflare_deployment_completed', `Your project has been permanently deployed to Cloudflare Workers: ${message.deploymentUrl}`));
                 
-                onDebugMessage?.('info', 
+                onDebugMessage?.('info',
                     'Deployment Completed - Redeploy Reset',
-                    `Deployment URL: ${message.deploymentUrl}\nPhase count at deployment: ${phaseTimeline.length}\nRedeploy button disabled until next phase`,
+                    `Deployment URL: ${message.deploymentUrl}\nPhase count at deployment: ${getPhaseTimeline().length}\nRedeploy button disabled until next phase`,
                     'Redeployment Management'
                 );
                 break;

@@ -1,19 +1,43 @@
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { defineConfig } from 'vitest/config';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-export default defineWorkersConfig({
-  test: {
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: './wrangler.test.jsonc' },
-        miniflare: {
-          compatibilityDate: '2024-12-12',
-          compatibilityFlags: ['nodejs_compat'],
-        },
-      },
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      'worker': path.resolve(__dirname, './worker'),
+      'shared': path.resolve(__dirname, './shared'),
     },
+  },
+  test: {
+    environment: 'node',
     globals: true,
     setupFiles: ['./test/setup.ts'],
-    include: ['**/*.{test,spec}.{js,ts,jsx,tsx}'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/test/**', '**/worker/api/routes/**'],
+    include: ['**/src/**/*.{test,spec}.{js,ts,jsx,tsx}', '**/worker/**/*.{test,spec}.{js,ts}'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      include: [
+        'src/routes/chat/hooks/use-chat.ts',
+        'src/routes/chat/utils/handle-websocket-message.ts',
+        'src/routes/chat/chat.tsx',
+      ],
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/*.test.ts',
+        '**/*.test.tsx',
+        '**/*.spec.ts',
+        '**/*.spec.tsx',
+      ],
+      lines: 80,
+      functions: 80,
+      branches: 70,
+      statements: 80,
+    },
   },
 });

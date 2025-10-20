@@ -550,34 +550,40 @@ export default function Chat() {
 								/>
 							)}
 
-							<PhaseTimeline
-								projectStages={projectStages}
-								phaseTimeline={phaseTimeline}
-								files={files}
-								view={view}
-								activeFile={activeFile}
-								onFileClick={handleFileClick}
-								isThinkingNext={isThinking}
-								isPreviewDeploying={isPreviewDeploying}
-								progress={progress}
-								total={total}
-								parentScrollRef={messagesContainerRef}
-								onViewChange={(viewMode) => {
-									setView(viewMode);
-									hasSwitchedFile.current = true;
-								}}
-								chatId={chatId}
-								isDeploying={isDeploying}
-								handleDeployToCloudflare={handleDeployToCloudflare}
-							/>
+							<motion.div
+								initial={{ opacity: 0, y: 10 }}
+								animate={{ opacity: 1, y: 0 }}
+								transition={{ duration: 0.3, delay: 0 }}
+							>
+								<PhaseTimeline
+									projectStages={projectStages}
+									phaseTimeline={phaseTimeline}
+									files={files}
+									view={view}
+									activeFile={activeFile}
+									onFileClick={handleFileClick}
+									isThinkingNext={isThinking}
+									isPreviewDeploying={isPreviewDeploying}
+									progress={progress}
+									total={total}
+									parentScrollRef={messagesContainerRef}
+									onViewChange={(viewMode) => {
+										setView(viewMode);
+										hasSwitchedFile.current = true;
+									}}
+									chatId={chatId}
+									isDeploying={isDeploying}
+									handleDeployToCloudflare={handleDeployToCloudflare}
+								/>
+							</motion.div>
 
 							{/* Deployment and Generation Controls */}
 							{chatId && (
 								<motion.div
 									ref={deploymentControlsRef}
-									initial={{ opacity: 0, y: 20 }}
+									initial={{ opacity: 0, y: 10 }}
 									animate={{ opacity: 1, y: 0 }}
-									transition={{ duration: 0.3, delay: 0.2 }}
+									transition={{ duration: 0.3, delay: 0.15 }}
 									className="px-4 mb-6"
 								>
 									<DeploymentControls
