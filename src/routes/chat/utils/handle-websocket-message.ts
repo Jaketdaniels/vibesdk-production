@@ -206,7 +206,7 @@ export function createWebSocketMessageHandler(deps: HandleMessageDeps) {
                     // Get current state using getters (Task 4: Stable Callback Dependencies)
                     const currentFiles = getFiles();
                     const currentTimeline = getPhaseTimeline();
-                    const currentStages = getProjectStages();
+                    void getProjectStages(); // Call getter to ensure stable callback pattern
 
                     if (state.blueprint && !blueprint) {
                         setBlueprint(state.blueprint);
