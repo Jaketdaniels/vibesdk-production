@@ -19,6 +19,7 @@ export default defineConfig({
 			'react-router',
 		],
 		holdUntilCrawlEnd: false,
+		rollupOptions: {},
 	},
 	plugins: [
 		react(),
