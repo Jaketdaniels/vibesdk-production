@@ -25,15 +25,6 @@
 		"head_sampling_rate": 0.1,
 	},
 	"logpush": true,
-	"build": {
-		"command": "bun run build",
-		"cwd": ".",
-		"watch_dirs": [
-			"src",
-			"worker",
-			"container"
-		]
-	},
 	"unsafe": {
 		"bindings": [
 			{
