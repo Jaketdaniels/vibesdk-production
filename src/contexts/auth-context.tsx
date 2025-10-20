@@ -1,6 +1,7 @@
 /**
- * Enhanced Auth Context with Passkey-First Authentication
- * Following 2025 best practices with improved error handling and UX
+ * Auth Context: deterministic WebAuthn orchestration
+ * - No conditional mediation
+ * - Clear error mapping, 60s timeout, limited retry for registration network errors
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
@@ -17,34 +18,18 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  
-  // Auth provider configuration
-  authProviders: {
-    passkey: boolean;
-    google: boolean;
-    github: boolean;
-    email: boolean;
-  } | null;
+  authProviders: { passkey: boolean; google: boolean; github: boolean; email: boolean; } | null;
   hasPasskey: boolean;
   hasOAuth: boolean;
   requiresEmailAuth: boolean;
-  
-  // Passkey methods (primary authentication)
   loginWithPasskey: () => Promise<void>;
   registerPasskey: (email?: string, displayName?: string) => Promise<void>;
-  
-  // OAuth login method with redirect support
   login: (provider: 'google' | 'github', redirectUrl?: string) => void;
-  
-  // Email/password login method (fallback)
   loginWithEmail: (credentials: { email: string; password: string }) => Promise<void>;
   register: (data: { email: string; password: string; name?: string }) => Promise<void>;
-  
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   clearError: () => void;
-  
-  // Redirect URL management
   setIntendedUrl: (url: string) => void;
   getIntendedUrl: () => string | null;
   clearIntendedUrl: () => void;
@@ -52,8 +37,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Token refresh interval - refresh every 10 minutes
-const TOKEN_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour (check less frequently since tokens last 24h)
+const TIMEOUT_MS = 60000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -66,71 +50,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [hasOAuth, setHasOAuth] = useState<boolean>(false);
   const [requiresEmailAuth, setRequiresEmailAuth] = useState<boolean>(false);
   const navigate = useNavigate();
-  
-  // Sync user context with Sentry for error tracking
   useSentryUser(user);
-  
-  // Ref to store the refresh timer
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Redirect URL management
   const INTENDED_URL_KEY = 'auth_intended_url';
+  const setIntendedUrl = useCallback((url: string) => { try { sessionStorage.setItem(INTENDED_URL_KEY, url); } catch {} }, []);
+  const getIntendedUrl = useCallback((): string | null => { try { return sessionStorage.getItem(INTENDED_URL_KEY); } catch { return null; } }, []);
+  const clearIntendedUrl = useCallback(() => { try { sessionStorage.removeItem(INTENDED_URL_KEY); } catch {} }, []);
 
-  const setIntendedUrl = useCallback((url: string) => {
-    try {
-      sessionStorage.setItem(INTENDED_URL_KEY, url);
-    } catch (error) {
-      console.warn('Failed to store intended URL:', error);
+  const mapPasskeyError = useCallback((err: any): string => {
+    if (err instanceof Error) {
+      if (err.name === 'NotAllowedError') return 'Authentication was cancelled or timed out. Please try again.';
+      if (err.name === 'NotSupportedError') return 'Passkeys are not supported on this device or browser.';
+      if (err.name === 'SecurityError') return 'Security error occurred. Ensure you\'re on a secure connection.';
+      if (err.message?.includes('CREDENTIAL_NOT_FOUND')) return 'No passkey found on this device for this site.';
+      if (err.message?.includes('CHALLENGE_EXPIRED')) return 'Authentication challenge expired. Please try again.';
+      return err.message;
     }
+    return 'Connection error. Please try again.';
   }, []);
 
-  const getIntendedUrl = useCallback((): string | null => {
-    try {
-      return sessionStorage.getItem(INTENDED_URL_KEY);
-    } catch (error) {
-      console.warn('Failed to retrieve intended URL:', error);
-      return null;
-    }
-  }, []);
-
-  const clearIntendedUrl = useCallback(() => {
-    try {
-      sessionStorage.removeItem(INTENDED_URL_KEY);
-    } catch (error) {
-      console.warn('Failed to clear intended URL:', error);
-    }
-  }, []);
-
-  // Enhanced error message mapping for better UX
-  const mapPasskeyError = useCallback((error: any): string => {
-    if (error instanceof Error) {
-      switch (error.name) {
-        case 'NotAllowedError':
-          return 'Authentication was cancelled or timed out. Please try again.';
-        case 'NotSupportedError':
-          return 'Passkeys are not supported on this device or browser. Please try a different device.';
-        case 'InvalidStateError':
-          return 'A passkey already exists for this device. Please use the existing passkey to sign in.';
-        case 'SecurityError':
-          return 'Security error occurred. Please ensure you\'re on a secure connection and try again.';
-        case 'AbortError':
-          return 'Authentication was cancelled.';
-        case 'NetworkError':
-          return 'Network error occurred. Please check your connection and try again.';
-        default:
-          if (error.message.includes('CHALLENGE_EXPIRED')) {
-            return 'Authentication challenge expired. Please try again.';
-          }
-          if (error.message.includes('CREDENTIAL_NOT_FOUND')) {
-            return 'Passkey not recognized. Please try a different passkey or create a new one.';
-          }
-          return error.message || 'Authentication failed. Please try again.';
-      }
-    }
-    return 'Connection error. Please check your internet connection and try again.';
-  }, []);
-
-  // Fetch auth providers configuration
   const fetchAuthProviders = useCallback(async () => {
     try {
       const response = await apiClient.getAuthProviders();
@@ -140,9 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setHasOAuth(response.data.hasOAuth);
         setRequiresEmailAuth(response.data.requiresEmailAuth);
       }
-    } catch (error) {
-      console.warn('Failed to fetch auth providers:', error);
-      // Fallback to passkey-first defaults
+    } catch {
       setAuthProviders({ passkey: true, google: false, github: false, email: true });
       setHasPasskey(true);
       setHasOAuth(false);
@@ -150,373 +87,132 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Check authentication status
   const checkAuth = useCallback(async () => {
     try {
       const response = await apiClient.getProfile(true);
-      
       if (response.success && response.data?.user) {
         setUser({ ...response.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Profile endpoint doesn't return token, cookies are used
-        setSession({
-          userId: response.data.user.id,
-          email: response.data.user.email,
-          sessionId: response.data.sessionId || response.data.user.id,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours expiry
-        });
-        
-        // Setup token refresh
+        setToken(null);
+        setSession({ userId: response.data.user.id, email: response.data.user.email, sessionId: response.data.sessionId || response.data.user.id, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) });
         setupTokenRefresh();
       } else {
-        setUser(null);
-        setToken(null);
-        setSession(null);
+        setUser(null); setToken(null); setSession(null);
       }
-    } catch (error) {
-      console.error('Auth check failed:', error);
-      setUser(null);
-      setToken(null);
-      setSession(null);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch {
+      setUser(null); setToken(null); setSession(null);
+    } finally { setIsLoading(false); }
   }, []);
 
-  // Setup automatic session validation (cookie-based)
   const setupTokenRefresh = useCallback(() => {
-    // Clear any existing timer
-    if (refreshTimerRef.current) {
-      clearInterval(refreshTimerRef.current);
-    }
-
-    // Set up session validation timer - less frequent since cookies handle refresh
-    refreshTimerRef.current = setInterval(async () => {
-      try {
-        const response = await apiClient.getProfile(true);
-
-        if (!response.success) {
-          // Session invalid, user needs to login again
-          setUser(null);
-          setToken(null);
-          setSession(null);
-          clearInterval(refreshTimerRef.current!);
-        }
-      } catch (error) {
-        console.error('Session validation failed:', error);
-      }
-    }, TOKEN_REFRESH_INTERVAL);
+    if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    refreshTimerRef.current = setInterval(async () => { try { const resp = await apiClient.getProfile(true); if (!resp.success) { setUser(null); setToken(null); setSession(null); clearInterval(refreshTimerRef.current!); } } catch {} }, 60 * 60 * 1000);
   }, []);
 
-  // Cleanup refresh timer on unmount
-  useEffect(() => {
-    return () => {
-      if (refreshTimerRef.current) {
-        clearInterval(refreshTimerRef.current);
-      }
-    };
-  }, []);
+  useEffect(() => { return () => { if (refreshTimerRef.current) clearInterval(refreshTimerRef.current); }; }, []);
+  useEffect(() => { (async () => { await fetchAuthProviders(); await checkAuth(); })(); }, [fetchAuthProviders, checkAuth]);
 
-  // Initialize auth state on mount
-  useEffect(() => {
-    const initAuth = async () => {
-      await fetchAuthProviders();
-      await checkAuth();
-    };
-    initAuth();
-  }, [fetchAuthProviders, checkAuth]);
-
-  // Enhanced passkey login with better error handling and UX
   const loginWithPasskey = useCallback(async () => {
-    setError(null);
-    setIsLoading(true);
-
+    setError(null); setIsLoading(true);
     try {
-      // Check WebAuthn support first
-      if (!window.PublicKeyCredential) {
-        throw new Error('Passkeys are not supported in this browser. Please use Chrome, Safari, or Edge.');
-      }
-
-      // Get authentication options from server
+      if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported in this browser.');
       const optionsResponse = await apiClient.getPasskeyAuthOptions();
-      
-      if (!optionsResponse.success || !optionsResponse.data) {
-        throw new Error(optionsResponse.error || 'Failed to get authentication options');
-      }
+      if (!optionsResponse.success || !optionsResponse.data) throw new Error(optionsResponse.error || 'Failed to get authentication options');
 
-      // Start WebAuthn authentication with timeout
       const authResponse = await Promise.race([
         startAuthentication(optionsResponse.data.options),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Authentication timed out after 60 seconds')), 60000)
-        )
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Authentication timed out after 60 seconds')), TIMEOUT_MS))
       ]) as any;
-      
-      // Verify authentication with server
-      const verifyResponse = await apiClient.verifyPasskeyAuth({
-        credential: authResponse,
-        challenge: optionsResponse.data.challenge
-      });
 
+      const verifyResponse = await apiClient.verifyPasskeyAuth({ credential: authResponse, challenge: optionsResponse.data.challenge });
       if (verifyResponse.success && verifyResponse.data) {
         setUser({ ...verifyResponse.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Using cookies for authentication
-        setSession({
-          userId: verifyResponse.data.user.id,
-          email: verifyResponse.data.user.email,
-          sessionId: verifyResponse.data.sessionId,
-          expiresAt: verifyResponse.data.expiresAt,
-        });
+        setToken(null);
+        setSession({ userId: verifyResponse.data.user.id, email: verifyResponse.data.user.email, sessionId: verifyResponse.data.sessionId, expiresAt: verifyResponse.data.expiresAt });
         setupTokenRefresh();
-        
-        // Navigate to intended URL or default to home
-        const intendedUrl = getIntendedUrl();
-        clearIntendedUrl();
-        navigate(intendedUrl || '/');
+        const intended = getIntendedUrl(); clearIntendedUrl(); navigate(intended || '/');
       } else {
-        throw new Error(verifyResponse.error || 'Authentication failed');
+        throw new Error(verifyResponse.error || 'CREDENTIAL_NOT_FOUND');
       }
-    } catch (error) {
-      console.error('Passkey login error:', error);
-      const errorMessage = mapPasskeyError(error);
-      setError(errorMessage);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (err) {
+      const msg = mapPasskeyError(err);
+      setError(msg);
+      throw err;
+    } finally { setIsLoading(false); }
   }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl, mapPasskeyError]);
 
-  // Enhanced passkey registration with better UX and error handling
+  const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
   const registerPasskey = useCallback(async (email?: string, displayName?: string) => {
-    setError(null);
-    setIsLoading(true);
-
+    setError(null); setIsLoading(true);
     try {
-      // Check WebAuthn support first
-      if (!window.PublicKeyCredential) {
-        throw new Error('Passkeys are not supported in this browser. Please use Chrome, Safari, or Edge.');
+      if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported in this browser.');
+      const normalized = (email || '').trim().toLowerCase();
+      if (!normalized || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Please enter a valid email address.');
+
+      const optionsResponse = await apiClient.getPasskeyRegOptions({ email: normalized, displayName });
+      if (!optionsResponse.success || !optionsResponse.data) throw new Error(optionsResponse.error || 'Failed to get registration options');
+
+      let regResponse: any;
+      try {
+        regResponse = await Promise.race([
+          startRegistration(optionsResponse.data.options),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Registration timed out after 60 seconds')), TIMEOUT_MS))
+        ]);
+      } catch (e) {
+        // transient retry once after small jitter for network issues only
+        if (e instanceof Error && e.name === 'NetworkError') {
+          await wait(400 + Math.floor(Math.random() * 400));
+          regResponse = await Promise.race([
+            startRegistration(optionsResponse.data.options),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Registration timed out after 60 seconds')), TIMEOUT_MS))
+          ]);
+        } else { throw e; }
       }
 
-      // Validate email if provided
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new Error('Please enter a valid email address.');
-      }
-
-      // Get registration options from server
-      const optionsResponse = await apiClient.getPasskeyRegOptions({
-        email,
-        displayName
-      });
-      
-      if (!optionsResponse.success || !optionsResponse.data) {
-        throw new Error(optionsResponse.error || 'Failed to get registration options');
-      }
-
-      // Start WebAuthn registration with timeout
-      const regResponse = await Promise.race([
-        startRegistration(optionsResponse.data.options),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Registration timed out after 60 seconds')), 60000)
-        )
-      ]) as any;
-      
-      // Verify registration with server
-      const verifyResponse = await apiClient.verifyPasskeyReg({
-        credential: regResponse,
-        challenge: optionsResponse.data.challenge,
-        email,
-        displayName
-      });
-
+      const verifyResponse = await apiClient.verifyPasskeyReg({ credential: regResponse, challenge: optionsResponse.data.challenge, email: normalized, displayName });
       if (verifyResponse.success && verifyResponse.data) {
         setUser({ ...verifyResponse.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Using cookies for authentication
-        setSession({
-          userId: verifyResponse.data.user.id,
-          email: verifyResponse.data.user.email,
-          sessionId: verifyResponse.data.sessionId,
-          expiresAt: verifyResponse.data.expiresAt,
-        });
+        setToken(null);
+        setSession({ userId: verifyResponse.data.user.id, email: verifyResponse.data.user.email, sessionId: verifyResponse.data.sessionId, expiresAt: verifyResponse.data.expiresAt });
         setupTokenRefresh();
-        
-        // Navigate to intended URL or default to home
-        const intendedUrl = getIntendedUrl();
-        clearIntendedUrl();
-        navigate(intendedUrl || '/');
+        const intended = getIntendedUrl(); clearIntendedUrl(); navigate(intended || '/');
       } else {
         throw new Error(verifyResponse.error || 'Registration failed');
       }
-    } catch (error) {
-      console.error('Passkey registration error:', error);
-      const errorMessage = mapPasskeyError(error);
-      setError(errorMessage);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (err) {
+      const msg = mapPasskeyError(err);
+      setError(msg);
+      throw err;
+    } finally { setIsLoading(false); }
   }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl, mapPasskeyError]);
 
-  // OAuth login method with redirect support
   const login = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
-    // Store intended redirect URL if provided, otherwise use current location
-    const intendedUrl = redirectUrl || window.location.pathname + window.location.search;
-    setIntendedUrl(intendedUrl);
-    
-    // Build OAuth URL with redirect parameter
-    const oauthUrl = new URL(`/api/auth/oauth/${provider}`, window.location.origin);
-    oauthUrl.searchParams.set('redirect_url', intendedUrl);
-    
-    // Redirect to OAuth provider
-    window.location.href = oauthUrl.toString();
+    const intendedUrl = redirectUrl || window.location.pathname + window.location.search; setIntendedUrl(intendedUrl);
+    const oauthUrl = new URL(`/api/auth/oauth/${provider}`, window.location.origin); oauthUrl.searchParams.set('redirect_url', intendedUrl); window.location.href = oauthUrl.toString();
   }, [setIntendedUrl]);
 
-  // Email/password login (fallback)
   const loginWithEmail = useCallback(async (credentials: { email: string; password: string }) => {
-    setError(null);
-    setIsLoading(true);
-
-    try {
-      const response = await apiClient.loginWithEmail(credentials);
-
-      if (response.success && response.data) {
-        setUser({ ...response.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Using cookies for authentication
-        setSession({
-          userId: response.data.user.id,
-          email: response.data.user.email,
-          sessionId: response.data.sessionId,
-          expiresAt: response.data.expiresAt,
-        });
-        setupTokenRefresh();
-        
-        // Navigate to intended URL or default to home
-        const intendedUrl = getIntendedUrl();
-        clearIntendedUrl();
-        navigate(intendedUrl || '/');
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      if (error instanceof ApiError) {
-        setError(error.message);
-      } else {
-        setError('Connection error. Please try again.');
-      }
-      // Don't navigate on error - let modal stay open
-      throw error; // Re-throw to inform caller
-    } finally {
-      setIsLoading(false);
-    }
+    setError(null); setIsLoading(true);
+    try { const response = await apiClient.loginWithEmail(credentials); if (response.success && response.data) { setUser({ ...response.data.user, isAnonymous: false } as AuthUser); setToken(null); setSession({ userId: response.data.user.id, email: response.data.user.email, sessionId: response.data.sessionId, expiresAt: response.data.expiresAt }); setupTokenRefresh(); const intended = getIntendedUrl(); clearIntendedUrl(); navigate(intended || '/'); } }
+    catch (err) { if (err instanceof ApiError) setError(err.message); else setError('Connection error. Please try again.'); throw err; }
+    finally { setIsLoading(false); }
   }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
 
-  // Register new user (fallback)
   const register = useCallback(async (data: { email: string; password: string; name?: string }) => {
-    setError(null);
-    setIsLoading(true);
-
-    try {
-      const response = await apiClient.register(data);
-
-      if (response.success && response.data) {
-        setUser({ ...response.data.user, isAnonymous: false } as AuthUser);
-        setToken(null); // Using cookies for authentication
-        setSession({
-          userId: response.data.user.id,
-          email: response.data.user.email,
-          sessionId: response.data.sessionId,
-          expiresAt: response.data.expiresAt,
-        });
-        setupTokenRefresh();
-        
-        // Navigate to intended URL or default to home
-        const intendedUrl = getIntendedUrl();
-        clearIntendedUrl();
-        navigate(intendedUrl || '/');
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      if (error instanceof ApiError) {
-        setError(error.message);
-      } else {
-        setError('Connection error. Please try again.');
-      }
-      throw error; // Re-throw to inform caller
-    } finally {
-      setIsLoading(false);
-    }
+    setError(null); setIsLoading(true);
+    try { const response = await apiClient.register(data); if (response.success && response.data) { setUser({ ...response.data.user, isAnonymous: false } as AuthUser); setToken(null); setSession({ userId: response.data.user.id, email: response.data.user.email, sessionId: response.data.sessionId, expiresAt: response.data.expiresAt }); setupTokenRefresh(); const intended = getIntendedUrl(); clearIntendedUrl(); navigate(intended || '/'); } }
+    catch (err) { if (err instanceof ApiError) setError(err.message); else setError('Connection error. Please try again.'); throw err; }
+    finally { setIsLoading(false); }
   }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
 
-  // Logout
-  const logout = useCallback(async () => {
-    try {
-      await apiClient.logout();
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      // Clear state regardless of API response
-      setUser(null);
-      setToken(null);
-      setSession(null);
-      if (refreshTimerRef.current) {
-        clearInterval(refreshTimerRef.current);
-      }
-      navigate('/');
-    }
-  }, [navigate]);
+  const logout = useCallback(async () => { try { await apiClient.logout(); } catch {} finally { setUser(null); setToken(null); setSession(null); if (refreshTimerRef.current) clearInterval(refreshTimerRef.current); navigate('/'); } }, [navigate]);
+  const refreshUser = useCallback(async () => { await checkAuth(); }, [checkAuth]);
+  const clearError = useCallback(() => { setError(null); }, []);
 
-  // Refresh user profile
-  const refreshUser = useCallback(async () => {
-    await checkAuth();
-  }, [checkAuth]);
-
-  // Clear error
-  const clearError = useCallback(() => {
-    setError(null);
-  }, []);
-
-  const value: AuthContextType = {
-    user,
-    token,
-    session,
-    isAuthenticated: !!user,
-    isLoading,
-    error,
-    authProviders,
-    hasPasskey,
-    hasOAuth,
-    requiresEmailAuth,
-    loginWithPasskey, // Primary authentication method
-    registerPasskey, // Primary registration method
-    login, // OAuth method with redirect support
-    loginWithEmail, // Email/password method (fallback)
-    register, // Email/password registration (fallback)
-    logout,
-    refreshUser,
-    clearError,
-    setIntendedUrl,
-    getIntendedUrl,
-    clearIntendedUrl,
-  };
+  const value: AuthContextType = { user, token, session, isAuthenticated: !!user, isLoading, error, authProviders, hasPasskey, hasOAuth, requiresEmailAuth, loginWithPasskey, registerPasskey, login, loginWithEmail, register, logout, refreshUser, clearError, setIntendedUrl, getIntendedUrl, clearIntendedUrl };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
-
-// Helper hook for protected routes
-export function useRequireAuth(redirectTo = '/') {
-  const { isAuthenticated, isLoading } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      navigate(redirectTo);
-    }
-  }, [isAuthenticated, isLoading, navigate, redirectTo]);
-
-  return { isAuthenticated, isLoading };
-}
+export function useAuth() { const context = useContext(AuthContext); if (context === undefined) { throw new Error('useAuth must be used within an AuthProvider'); } return context; }
+export function useRequireAuth(redirectTo = '/') { const { isAuthenticated, isLoading } = useAuth(); const navigate = useNavigate(); useEffect(() => { if (!isLoading && !isAuthenticated) { navigate(redirectTo); } }, [isAuthenticated, isLoading, navigate, redirectTo]); return { isAuthenticated, isLoading }; }
