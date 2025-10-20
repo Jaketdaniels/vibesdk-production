@@ -65,7 +65,7 @@ import CerebrasLogo from '@/assets/provider-logos/cerebras.svg?react';
 import CloudflareLogo from '@/assets/provider-logos/cloudflare.svg?react';
 
 export default function SettingsPage() {
-	const { user } = useAuth();
+	const { user, isLoading } = useAuth();
 	// Active sessions state
 	const [activeSessions, setActiveSessions] = useState<
 		ActiveSessionsData & { loading: boolean }
@@ -505,12 +505,12 @@ export default function SettingsPage() {
 
 	// Load GitHub integration, sessions, API keys, user secrets, and model configs on component mount
 	React.useEffect(() => {
-		if (user) {
+		if (!isLoading && user) {
 			loadActiveSessions();
 			loadModelConfigs();
             loadSecretTemplates();
 		}
-	}, [user]);
+	}, [user, isLoading]);
 
 	return (
 		<div className="min-h-screen bg-bg-3 relative">

@@ -21,6 +21,7 @@ import { isConversationalMessage, addOrUpdateMessage, createUserMessage, handleR
 import { sendWebSocketMessage } from '../utils/websocket-helpers';
 import { initialStages as defaultStages, updateStage as updateStageHelper } from '../utils/project-stage-helpers';
 import type { ProjectStage } from '../utils/project-stage-helpers';
+import { useAuth } from '@/contexts/auth-context';
 
 
 export interface FileType {
@@ -63,6 +64,7 @@ export function useChat({
 	onDebugMessage?: (type: 'error' | 'warning' | 'info' | 'websocket', message: string, details?: string, source?: string, messageType?: string, rawMessage?: unknown) => void;
 	onTerminalMessage?: (log: { id: string; content: string; type: 'command' | 'stdout' | 'stderr' | 'info' | 'error' | 'warn' | 'debug'; timestamp: number; source?: string }) => void;
 }) {
+	const { isAuthenticated, isLoading } = useAuth();
 	const connectionStatus = useRef<'idle' | 'connecting' | 'connected' | 'failed' | 'retrying'>('idle');
 	const retryCount = useRef(0);
 	const maxRetries = 5;
@@ -533,8 +535,12 @@ export function useChat({
 				}
 			}
 		}
-		init();
-	}, []);
+
+		// Only initialize if authentication has completed
+		if (!isLoading) {
+			init();
+		}
+	}, [isLoading, isAuthenticated]);
 
     // Mount/unmount: enable/disable reconnection and clear pending retries
     useEffect(() => {

@@ -119,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!optionsResponse.success || !optionsResponse.data) throw new Error(optionsResponse.error || 'Failed to get authentication options');
 
       const authResponse = await Promise.race([
-        startAuthentication(optionsResponse.data.options),
+        startAuthentication({ optionsJSON: optionsResponse.data.options }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Authentication timed out after 60 seconds')), TIMEOUT_MS))
       ]) as any;
 
@@ -155,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let regResponse: any;
       try {
         regResponse = await Promise.race([
-          startRegistration(optionsResponse.data.options),
+          startRegistration({ optionsJSON: optionsResponse.data.options }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Registration timed out after 60 seconds')), TIMEOUT_MS))
         ]);
       } catch (e) {
@@ -163,7 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (e instanceof Error && e.name === 'NetworkError') {
           await wait(400 + Math.floor(Math.random() * 400));
           regResponse = await Promise.race([
-            startRegistration(optionsResponse.data.options),
+            startRegistration({ optionsJSON: optionsResponse.data.options }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Registration timed out after 60 seconds')), TIMEOUT_MS))
           ]);
         } else { throw e; }
