@@ -8,16 +8,9 @@ import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { createLogger } from '../../logger';
 import { authMiddleware } from '../../middleware/auth/auth';
+import type { AppEnv } from '../../types/appenv';
 
 const logger = createLogger('PasskeyManagement');
-
-interface CloudflareBindings {
-  DB: D1Database;
-}
-
-type AppEnv = {
-  Bindings: CloudflareBindings;
-};
 
 interface CredentialRecord {
   id: string;
@@ -43,7 +36,7 @@ const deleteCredentialSchema = z.object({
 });
 
 // Database operations
-async function getUserCredentials(env: CloudflareBindings, userId: string): Promise<CredentialRecord[]> {
+async function getUserCredentials(env: Env, userId: string): Promise<CredentialRecord[]> {
   const results = await env.DB.prepare(`
     SELECT 
       id,
@@ -67,7 +60,7 @@ async function getUserCredentials(env: CloudflareBindings, userId: string): Prom
 }
 
 async function updateCredentialName(
-  env: CloudflareBindings,
+  env: Env,
   userId: string,
   credentialId: string,
   name: string
@@ -84,7 +77,7 @@ async function updateCredentialName(
 }
 
 async function deleteCredential(
-  env: CloudflareBindings,
+  env: Env,
   userId: string,
   credentialId: string
 ): Promise<boolean> {
@@ -98,7 +91,7 @@ async function deleteCredential(
   return (result as any)?.meta?.changes > 0;
 }
 
-async function countUserCredentials(env: CloudflareBindings, userId: string): Promise<number> {
+async function countUserCredentials(env: Env, userId: string): Promise<number> {
   const result = await env.DB.prepare(`
     SELECT COUNT(*) as count
     FROM webauthn_credentials 
