@@ -258,30 +258,27 @@ export default function AppView() {
 				const config = actionConfigs[configKey];
 				if (!config) return;
 
-				const currentUrl = `/app/${app.id}?action=${config.action}`;
-
-				// Use auth guard with action parameter in intended URL
-				if (
-					!requireAuth({
-						requireFullAuth: true,
-						actionContext: config.context,
-						intendedUrl: currentUrl,
-					})
-				) {
-					return;
-				}
-
-				// User is authenticated, execute immediately
-				try {
-					await config.handler();
-				} catch (error) {
-					console.error(`${config.action} error:`, error);
-					toast.error(
-						error instanceof ApiError
-							? error.message
-							: config.errorMessage,
-					);
-				}
+			// Use auth guard with onSuccess callback
+			if (
+				!requireAuth({
+					requireFullAuth: true,
+					actionContext: config.context,
+					onSuccess: async () => {
+						try {
+							await config.handler();
+						} catch (error) {
+							console.error(`${config.action} error:`, error);
+							toast.error(
+								error instanceof ApiError
+									? error.message
+									: config.errorMessage,
+							);
+						}
+					},
+				})
+			) {
+				return;
+			}
 			};
 		},
 		[actionConfigs, app, requireAuth],

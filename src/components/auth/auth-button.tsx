@@ -1,6 +1,6 @@
 /**
- * Enhanced Auth Button
- * Provides OAuth + Email/Password authentication with enhanced UI
+ * Passkey-Only Auth Button
+ * Provides WebAuthn passkey authentication with clean UI
  */
 
 import { useState } from 'react';
@@ -32,9 +32,7 @@ export function AuthButton({ className }: AuthButtonProps) {
 		isAuthenticated,
 		isLoading,
 		error,
-		login, // OAuth method
-		loginWithEmail,
-		register,
+		loginWithPasskey,
 		logout,
 		clearError,
 	} = useAuth();
@@ -62,27 +60,7 @@ export function AuthButton({ className }: AuthButtonProps) {
 				<LoginModal
 					isOpen={showLoginModal}
 					onClose={() => setShowLoginModal(false)}
-					onLogin={(provider) => {
-						// For backward compatibility with original login interface
-						login(provider);
-						setShowLoginModal(false);
-					}}
-					onEmailLogin={async (credentials) => {
-						await loginWithEmail(credentials);
-						if (!error) {
-							setShowLoginModal(false);
-						}
-					}}
-					onOAuthLogin={(provider) => {
-						login(provider);
-						setShowLoginModal(false);
-					}}
-					onRegister={async (data) => {
-						await register(data);
-						if (!error) {
-							setShowLoginModal(false);
-						}
-					}}
+					onPasskeyLogin={loginWithPasskey}
 					error={error}
 					onClearError={clearError}
 				/>

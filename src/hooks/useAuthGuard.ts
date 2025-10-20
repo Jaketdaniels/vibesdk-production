@@ -12,7 +12,6 @@ export interface AuthGuardOptions {
   requireFullAuth?: boolean; // If true, anonymous users are not allowed
   actionContext?: string; // Context message for the login modal
   onSuccess?: () => void; // Callback to execute after successful authentication
-  intendedUrl?: string; // URL to redirect to after authentication
 }
 
 export interface AuthGuardReturn {
@@ -32,7 +31,7 @@ export function useAuthGuard(): AuthGuardReturn {
     // If already authenticated, check if anonymous users are allowed
     if (isAuthenticated) {
       if (options.requireFullAuth && user?.isAnonymous) {
-        showAuthModal(options.actionContext, options.onSuccess, options.intendedUrl);
+        showAuthModal(options.actionContext, options.onSuccess);
         return false;
       }
       // User is authenticated and meets requirements, execute success callback immediately
@@ -42,8 +41,8 @@ export function useAuthGuard(): AuthGuardReturn {
       return true;
     }
 
-    // Show login modal with context, pending action, and intended URL
-    showAuthModal(options.actionContext, options.onSuccess, options.intendedUrl);
+    // Show login modal with context and pending action
+    showAuthModal(options.actionContext, options.onSuccess);
     return false;
   }, [isAuthenticated, user?.isAnonymous, showAuthModal]);
 

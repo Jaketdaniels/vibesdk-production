@@ -23,6 +23,9 @@ export default defineConfig({
 	plugins: [
 		react(),
 		svgr(),
+		// NOTE: @cloudflare/vite-plugin@1.13.13 internally uses deprecated optimizeDeps.esbuildOptions
+		// This causes Vite 7 warnings but is functionally safe due to Vite's compatibility layer
+		// Waiting for Cloudflare to update plugin to use Rolldown-compatible API
 		cloudflare({
 			configPath: 'wrangler.jsonc',
 			experimental: { remoteBindings: true },

@@ -64,25 +64,23 @@ export default function Home() {
 	const handleCreateApp = (query: string, mode: AgentMode) => {
 		const encodedQuery = encodeURIComponent(query);
 		const encodedMode = encodeURIComponent(mode);
-		
+
 		// Encode images as JSON if present
 		const imageParam = images.length > 0 ? `&images=${encodeURIComponent(JSON.stringify(images))}` : '';
-		const intendedUrl = `/chat/new?query=${encodedQuery}&agentMode=${encodedMode}${imageParam}`;
+		const targetUrl = `/chat/new?query=${encodedQuery}&agentMode=${encodedMode}${imageParam}`;
 
 		if (
 			!requireAuth({
 				requireFullAuth: true,
 				actionContext: 'to create applications',
-				intendedUrl: intendedUrl,
+				onSuccess: () => {
+					navigate(targetUrl);
+					clearImages();
+				},
 			})
 		) {
 			return;
 		}
-
-		// User is already authenticated, navigate immediately
-		navigate(intendedUrl);
-		// Clear images after navigation
-		clearImages();
 	};
 
 	// Auto-resize textarea based on content
