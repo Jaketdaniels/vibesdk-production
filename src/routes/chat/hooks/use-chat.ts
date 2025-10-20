@@ -52,7 +52,7 @@ export function useChat({
 	chatId: urlChatId,
 	query: userQuery,
 	images: userImages,
-	agentMode = 'deterministic',
+	agentMode = 'smart',
 	onDebugMessage,
 	onTerminalMessage,
 }: {

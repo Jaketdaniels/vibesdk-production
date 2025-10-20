@@ -40,7 +40,7 @@ export default function Chat() {
 
 	const [searchParams] = useSearchParams();
 	const userQuery = searchParams.get('query');
-	const agentMode = searchParams.get('agentMode') || 'deterministic';
+	const agentMode = searchParams.get('agentMode') || 'smart';
 	
 	// Extract images from URL params if present
 	const userImages = useMemo(() => {

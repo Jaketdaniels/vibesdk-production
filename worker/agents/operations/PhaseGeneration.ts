@@ -53,6 +53,63 @@ const SYSTEM_PROMPT = `<ROLE>
     **REMEMBER: This is not a toy or educational project. This is a serious project which the client is either undertaking for building their own product/business OR for testing out our capabilities and quality.**
 </TASK>
 
+<CRITICAL_FILE_ORDERING>
+**UI-FIRST FILE ORDERING - MANDATORY FOR WOW FACTOR**
+
+When planning phase files, you MUST order them to show visual results FIRST. This creates the "wow factor" - users see their UI appear within seconds.
+
+**Ordering Priority (ALWAYS follow this order):**
+
+1️⃣ **Main UI Entry Point FIRST**
+   - Example: src/App.tsx, src/pages/Home.tsx, src/routes/index.tsx
+   - This is what users see immediately - make it appear within 2-3 seconds
+   - The FIRST file in your list should ALWAYS be the main visual component
+
+2️⃣ **Core UI Components**
+   - Example: src/components/Calculator.tsx, src/components/TodoList.tsx
+   - Visual building blocks that make the page interactive
+   - Components that are directly visible on screen
+
+3️⃣ **UI Enhancement Files**
+   - Example: src/components/ui/button.tsx, src/lib/utils.ts
+   - Supporting UI utilities and styled components
+   - Tailwind config modifications if needed
+
+4️⃣ **Business Logic**
+   - Example: src/utils/calculations.ts, src/hooks/useTodos.ts
+   - Data processing and state management
+   - Custom hooks and utilities
+
+5️⃣ **Backend/API Files LAST**
+   - Example: src/api/routes.ts, worker/index.ts
+   - Server-side logic that doesn't affect initial visual appearance
+   - API endpoints and database operations
+
+**Why This Matters:**
+Users experience a "wow factor" when they see their UI appear within seconds, even if backend logic is still generating. A working visual interface creates excitement and engagement, while watching a loading screen with no preview is frustrating and makes the tool feel slow.
+
+**Example CORRECT Ordering:**
+✅ [
+  'src/App.tsx',                    // Main UI - appears FIRST
+  'src/components/Calculator.tsx',  // Visual component
+  'src/components/ui/button.tsx',   // UI primitives
+  'src/utils/calculate.ts',         // Business logic
+  'src/api/routes.ts'               // Backend - LAST
+]
+
+**Example WRONG Ordering:**
+❌ [
+  'src/api/routes.ts',              // Backend first - BAD
+  'src/utils/calculate.ts',
+  'worker/index.ts',
+  'src/App.tsx',                    // Main UI last - BAD
+  'src/components/Calculator.tsx'
+]
+
+**Implementation:**
+In your phase response, the \`files\` array MUST be ordered exactly as above. The implementation system will generate files in the exact order you provide, so ordering them correctly ensures users see their UI appear fast.
+</CRITICAL_FILE_ORDERING>
+
 ${STRATEGIES.FRONTEND_FIRST_PLANNING}
 
 ${PROMPT_UTILS.UI_GUIDELINES}

@@ -718,7 +718,6 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
     async executeReviewCycle(): Promise<CurrentDevState> {
         this.logger().info("Executing REVIEWING state");
 
-        const reviewCycles = 2;
         if (this.state.reviewingInitiated) {
             this.logger().info("Reviewing already initiated, skipping");
             return CurrentDevState.IDLE;
@@ -727,41 +726,63 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
             ...this.state,
             reviewingInitiated: true
         });
-        
-        try {
-            this.logger().info("Starting code review and improvement cycle...");
 
-            for (let i = 0; i < reviewCycles; i++) {
+        try {
+            this.logger().info("Starting code review and improvement cycle with preview health validation...");
+
+            const MAX_REVIEW_CYCLES = 10; // Safety limit to prevent infinite loops
+            let cycleCount = 0;
+            let previewHealthy = false;
+
+            while (cycleCount < MAX_REVIEW_CYCLES && !previewHealthy) {
                 // Check if user input came during review - if so, go back to phase generation
                 if (this.state.pendingUserInputs.length > 0) {
                     this.logger().info("User input received during review, transitioning back to PHASE_GENERATING");
                     return CurrentDevState.PHASE_GENERATING;
                 }
 
-                this.logger().info(`Starting code review cycle ${i + 1}...`);
+                cycleCount++;
 
+                // Add exponential backoff between cycles to prevent rate limits
+                // Backoff: 0ms, 1s, 2s, 4s, 8s, 10s (capped at 10s)
+                if (cycleCount > 1) {
+                    const backoffMs = Math.min(1000 * Math.pow(2, cycleCount - 2), 10000);
+                    this.logger().info(`⏳ Backing off ${backoffMs}ms before cycle ${cycleCount} to prevent rate limits`);
+                    await new Promise(resolve => setTimeout(resolve, backoffMs));
+                }
+
+                this.logger().info(`🔄 Review cycle ${cycleCount}/${MAX_REVIEW_CYCLES} - checking preview health...`);
+
+                // Run code review to find issues
                 const reviewResult = await this.reviewCode();
 
                 if (!reviewResult) {
-                    this.logger().warn("Code review failed. Skipping fix cycle.");
-                    break;
+                    this.logger().warn("Code review failed. Checking preview health before continuing.");
+                    // Even if review fails, check preview health
+                    previewHealthy = await this.validatePreviewHealth();
+                    if (previewHealthy) {
+                        this.logger().info("✅ Preview is healthy despite review failure - proceeding");
+                        break;
+                    }
+                    // Continue loop to try fixing
+                    continue;
                 }
 
                 const issuesFound = reviewResult.issuesFound;
 
                 if (issuesFound) {
-                    this.logger().info(`Issues found in review cycle ${i + 1}`, { issuesFound });
+                    this.logger().info(`Issues found in review cycle ${cycleCount}`, { issuesFound });
                     const promises = [];
 
                     for (const fileToFix of reviewResult.filesToFix) {
                         if (!fileToFix.require_code_changes) continue;
-                        
+
                         const fileToRegenerate = this.fileManager.getGeneratedFile(fileToFix.filePath);
                         if (!fileToRegenerate) {
                             this.logger().warn(`File to fix not found in generated files: ${fileToFix.filePath}`);
                             continue;
                         }
-                        
+
                         promises.push(this.regenerateFile(
                             fileToRegenerate,
                             fileToFix.issues,
@@ -772,15 +793,44 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
                     const fileResults = await Promise.allSettled(promises);
                     const files: FileOutputType[] = fileResults.map(result => result.status === "fulfilled" ? result.value : null).filter((result) => result !== null);
 
-                    await this.deployToSandbox(files, false, "fix: Applying code review fixes");
-
-                    // await this.applyDeterministicCodeFixes();
+                    if (files.length > 0) {
+                        this.logger().info(`Deploying ${files.length} fixed files...`);
+                        await this.deployToSandbox(files, false, "fix: Applying code review fixes");
+                    }
 
                     this.logger().info("Completed regeneration for review cycle");
                 } else {
-                    this.logger().info("Code review found no issues. Review cycles complete.");
-                    break;
+                    this.logger().info("Code review found no issues.");
                 }
+
+                // CRITICAL: Check preview health after deploying fixes
+                this.logger().info("Checking preview health after fixes...");
+                previewHealthy = await this.validatePreviewHealth();
+
+                if (previewHealthy) {
+                    this.logger().info(`✅ Preview is healthy after ${cycleCount} review cycle(s)`);
+                    break;
+                } else {
+                    this.logger().warn(`⚠️ Preview still unhealthy after cycle ${cycleCount} - continuing to fix`);
+
+                    // If no issues were found by review but preview is still unhealthy,
+                    // fetch fresh runtime errors for next cycle
+                    if (!issuesFound) {
+                        const runtimeErrors = await this.fetchRuntimeErrors(false);
+                        if (runtimeErrors.length === 0) {
+                            this.logger().warn("No review issues and no runtime errors, but preview unhealthy. May need manual intervention.");
+                            // Still continue loop in case it's a transient issue
+                        }
+                    }
+                }
+            }
+
+            // Final status check
+            if (previewHealthy) {
+                this.logger().info(`🎉 Review complete - preview is healthy after ${cycleCount} cycles`);
+            } else {
+                this.logger().error(`❌ Preview still unhealthy after ${cycleCount} cycles - reached max limit`);
+                // Continue anyway - user can manually intervene
             }
 
             // Check again for user input before finalizing
@@ -1894,6 +1944,106 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
                 error: `Error deploying to sandbox service: ${errorMsg}. Please report an issue if this persists`,
             });
             return null;
+        }
+    }
+
+    /**
+     * Validate preview is actually loading and working via debug console
+     * Checks runtime errors and console logs for preview health
+     */
+    private async validatePreviewHealth(): Promise<boolean> {
+        const { sandboxInstanceId } = this.state;
+        if (!sandboxInstanceId) {
+            this.logger().warn('No sandbox instance for preview health check');
+            return false;
+        }
+
+        // Helper to add timeout to any async operation
+        const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> => {
+            return Promise.race([
+                promise,
+                new Promise<T>((_, reject) =>
+                    setTimeout(() => reject(new Error(`${operation} timeout after ${timeoutMs}ms`)), timeoutMs)
+                )
+            ]);
+        };
+
+        try {
+            // Check 1: Instance must be healthy
+            const status = await withTimeout(
+                this.getSandboxServiceClient().getInstanceStatus(sandboxInstanceId),
+                5000,
+                'Instance status check'
+            );
+
+            if (!status.success || !status.isHealthy || !status.previewURL) {
+                this.logger().warn('Preview health: instance not healthy', { status });
+                return false;
+            }
+
+            // Check 2: No critical runtime errors in debug console
+            const runtimeErrors = await withTimeout(
+                this.fetchRuntimeErrors(false), // Don't clear - just check
+                5000,
+                'Runtime errors fetch'
+            );
+
+            const criticalErrors = runtimeErrors.filter(err =>
+                err.message.includes('Maximum update depth') ||
+                err.message.includes('re-renders') ||
+                err.message.includes('Cannot read properties of undefined') ||
+                err.message.includes('is not defined') ||
+                err.message.includes('Failed to compile')
+            );
+
+            if (criticalErrors.length > 0) {
+                this.logger().warn('Preview health: critical errors in debug console', {
+                    errorCount: criticalErrors.length,
+                    errors: criticalErrors.map(e => e.message)
+                });
+                return false;
+            }
+
+            // Check 3: Check debug console logs for preview loading success
+            const logsResponse = await withTimeout(
+                this.getLogs(false),
+                5000,
+                'Logs fetch'
+            );
+            const consoleOutput = logsResponse + ''; // Ensure string
+
+            // Look for signs preview failed to load
+            const failurePatterns = [
+                'Loading Preview\nPreview not ready yet. Retrying',
+                'Error: Failed to fetch',
+                'net::ERR_',
+                'ECONNREFUSED',
+                'Preview URLs may take a moment to become available'
+            ];
+
+            const hasFailurePattern = failurePatterns.some(pattern =>
+                consoleOutput.includes(pattern)
+            );
+
+            if (hasFailurePattern) {
+                this.logger().warn('Preview health: debug console shows preview loading failures');
+                return false;
+            }
+
+            this.logger().info('✅ Preview health check passed', {
+                hasPreviewUrl: !!status.previewURL,
+                runtimeErrorsCount: runtimeErrors.length,
+                criticalErrorsCount: criticalErrors.length
+            });
+
+            return true;
+        } catch (error) {
+            if (error instanceof Error && error.message.includes('timeout')) {
+                this.logger().warn('Preview health check timeout - assuming unhealthy', { error: error.message });
+            } else {
+                this.logger().error('Preview health check exception', error);
+            }
+            return false;
         }
     }
 

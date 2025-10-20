@@ -29,10 +29,35 @@ export class SmartCodeGeneratorAgent extends SimpleCodeGeneratorAgent {
     async executeReviewCycle(): Promise<CurrentDevState> {
         const result = await super.executeReviewCycle();
 
-        if (this.state.agentMode === 'smart') {
-            this.logger().info('Smart mode enabled - running enhancement cycle');
-            await this.smartEnhancementCycle();
+        // Skip smart enhancement for simple projects to avoid unnecessary overhead
+        const generatedFiles = this.fileManager.getGeneratedFilePaths();
+        const fileCount = generatedFiles.length;
+
+        // Calculate total lines of code
+        let totalLines = 0;
+        for (const filePath of generatedFiles) {
+            const file = this.fileManager.getGeneratedFile(filePath);
+            if (file?.fileContents) {
+                totalLines += file.fileContents.split('\n').length;
+            }
         }
+
+        // Skip enhancement for simple projects (<5 files OR <500 total lines)
+        if (fileCount < 5 || totalLines < 500) {
+            this.logger().info('Skipping smart enhancement for simple project', {
+                fileCount,
+                totalLines,
+                reason: 'Project too small to benefit from enhancement cycle'
+            });
+            return result;
+        }
+
+        // Run smart enhancement for complex projects (2025 best practices, React 19, Tailwind v4)
+        this.logger().info('Running smart enhancement cycle for quality improvements', {
+            fileCount,
+            totalLines
+        });
+        await this.smartEnhancementCycle();
 
         return result;
     }
@@ -74,6 +99,13 @@ export class SmartCodeGeneratorAgent extends SimpleCodeGeneratorAgent {
             this.logger().info('No quality enhancements identified - code already high quality');
             return;
         }
+
+        // Log enhancement stats
+        this.logger().info('Smart enhancement analysis complete', {
+            systematicPatterns: systematicPatternsCount,
+            individualFiles: individualFilesCount,
+            enhancementsFound: reviewResult.enhancementsFound
+        });
 
         const filesToEnhance: Array<{
             file: FileOutputType;

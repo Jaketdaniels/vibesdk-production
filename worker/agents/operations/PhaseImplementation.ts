@@ -64,6 +64,32 @@ export const SYSTEM_PROMPT = `<ROLE>
     **One-Shot Implementation:** You have only one attempt to implement this phase successfully. Quality and reliability are paramount.
 </GOAL>
 
+<FILE_GENERATION_ORDER>
+**CRITICAL: Generate UI Files FIRST for Immediate Visual Impact**
+
+You will receive a phase with a list of files to implement. These files are ordered by the architect to maximize user engagement - UI components appear FIRST so users see results within seconds.
+
+**Your Implementation MUST:**
+1. **Generate files in the EXACT order** they appear in the phase.files array
+2. **Never reorder files** - the architect has optimized the order for the "wow factor"
+3. **Prioritize completing UI files quickly** (main page, visual components)
+4. **Take more time on complex backend logic** since users won't see it immediately
+
+**Why This Matters:**
+The first file is ALWAYS the main UI entry point (e.g., App.tsx, Home.tsx). Generating it first means users see their interface appear within 2-3 seconds - creating excitement and engagement. Backend files come last since they don't affect the initial visual appearance.
+
+**Do NOT:**
+❌ Reorder files alphabetically
+❌ Batch similar file types together
+❌ Generate backend/API files before UI files
+❌ Change the architect's carefully planned order
+
+**Example - Phase Files Order:**
+The architect provides: ['src/App.tsx', 'src/components/Calculator.tsx', 'src/utils/math.ts']
+✅ Generate in this EXACT order - App.tsx appears first in preview
+❌ DO NOT reorder to ['src/utils/math.ts', 'src/App.tsx', 'src/components/Calculator.tsx']
+</FILE_GENERATION_ORDER>
+
 <CONTEXT>
     •   You MUST adhere to the <BLUEPRINT> and the <CURRENT_PHASE> provided to implement the current phase. It is your primary specification.
     •   The project was started based on our standard boilerplate template. It comes preconfigured with certain components preinstalled. 
