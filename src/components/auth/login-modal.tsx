@@ -34,6 +34,11 @@ export function LoginModal({
   const [showRegister, setShowRegister] = useState(false);
   const [email, setEmail] = useState('');
 
+  const isValidEmail = (emailValue: string): boolean => {
+    const normalized = emailValue.trim().toLowerCase();
+    return !!normalized && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+  };
+
   const handleClose = () => {
     if (onClearError) onClearError();
     setShowRegister(false);
@@ -154,7 +159,7 @@ export function LoginModal({
                     <motion.button
                       type="submit"
                       whileTap={{ scale: 0.98 }}
-                      disabled={isLoading}
+                      disabled={isLoading || !isValidEmail(email)}
                       className="w-full group relative overflow-hidden rounded-xl bg-primary p-4 text-primary-foreground transition-all hover:bg-primary/90 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
                     >
                       <div className="relative z-10 flex items-center justify-center gap-3">
