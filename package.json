@@ -136,6 +136,10 @@
 		"vitest": "^3.2.4",
 		"wrangler": "4.42.0"
 	},
+	"engines": {
+		"node": ">=20.0.0",
+		"npm": ">=10.0.0"
+	},
 	"prettier": {
 		"singleQuote": true,
 		"useTabs": true
