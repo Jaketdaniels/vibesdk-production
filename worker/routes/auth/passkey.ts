@@ -1,8 +1,5 @@
 /**
- * Passkey Authentication Routes (strict conventional flows)
- * - Registration requires email; userName = email (lowercased)
- * - Discoverable credentials with residentKey required
- * - Consistent, single-use challenges; clear error codes
+ * Passkey Authentication Routes (fix challenge structure + CSRF-friendly)
  */
 
 import { Hono } from 'hono';
@@ -20,27 +17,25 @@ import { createLogger } from '../../logger';
 
 const logger = createLogger('PasskeyAuth');
 
-type AppEnv = {
-  Bindings: Env;
-};
+type AppEnv = { Bindings: Env };
 
 interface UserRecord { id: string; email: string | null; name: string | null; display_name: string | null; created_at: string; updated_at: string; }
 interface CredentialRecord { user_id: string; credential_id: string; public_key: string; counter: number; transports: string | null; aaguid: string | null; created_at: string; }
 interface SessionData { id: string; user_id: string; expires_at: string; }
 
-const regOptionsSchema = z.object({ email: z.string().email() }); // email required
+const regOptionsSchema = z.object({ email: z.string().email() });
 const regVerifySchema = z.object({
-  credential: z.object({ id: z.string(), rawId: z.string(), response: z.object({ attestationObject: z.string(), clientDataJSON: z.string(), transports: z.array(z.enum(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'])).optional(), }), type: z.literal('public-key'), clientExtensionResults: z.object({}).passthrough().optional(), authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(), }) as z.ZodType<RegistrationResponseJSON>,
+  credential: z.object({ id: z.string(), rawId: z.string(), response: z.object({ attestationObject: z.string(), clientDataJSON: z.string(), transports: z.array(z.enum(['ble','cable','hybrid','internal','nfc','smart-card','usb'])).optional(), }), type: z.literal('public-key'), clientExtensionResults: z.object({}).passthrough().optional(), authenticatorAttachment: z.enum(['platform','cross-platform']).optional(), }) as z.ZodType<RegistrationResponseJSON>,
   challenge: z.string(), email: z.string().email(),
 });
 const authVerifySchema = z.object({
-  credential: z.object({ id: z.string(), rawId: z.string(), response: z.object({ authenticatorData: z.string(), clientDataJSON: z.string(), signature: z.string(), userHandle: z.string().optional(), }), type: z.literal('public-key'), clientExtensionResults: z.object({}).passthrough().optional(), authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(), }) as z.ZodType<AuthenticationResponseJSON>,
+  credential: z.object({ id: z.string(), rawId: z.string(), response: z.object({ authenticatorData: z.string(), clientDataJSON: z.string(), signature: z.string(), userHandle: z.string().optional(), }), type: z.literal('public-key'), clientExtensionResults: z.object({}).passthrough().optional(), authenticatorAttachment: z.enum(['platform','cross-platform']).optional(), }) as z.ZodType<AuthenticationResponseJSON>,
   challenge: z.string(),
 });
 
 const CHALLENGE_TTL_SECONDS = 300;
 
-function b64urlChallenge(): string { const bytes = new Uint8Array(32); crypto.getRandomValues(bytes); return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); }
+function randomBytes(size = 32): Uint8Array { const b = new Uint8Array(size); crypto.getRandomValues(b); return b; }
 function regKey(ch: string): string { return `reg:${ch}`; }
 function authKey(ch: string): string { return `auth:${ch}`; }
 async function kvPut(kv: KVNamespace, key: string, value: string, ttl = CHALLENGE_TTL_SECONDS) { await kv.put(key, value, { expirationTtl: ttl }); }
@@ -69,8 +64,11 @@ app.post('/register/options', zValidator('json', regOptionsSchema), async (c) =>
     let user = await findUserByEmail(env, email);
     let userId = user?.id ?? crypto.randomUUID();
 
-    const challenge = b64urlChallenge();
-    await kvPut(env.WEBAUTHN_CHALLENGES, regKey(challenge), JSON.stringify({ userId, challenge }));
+    // Create raw binary challenge for options and a b64url-encoded copy for verify payload
+    const challengeBytes = randomBytes(32);
+    const challengeB64 = isoBase64URL.fromBuffer(challengeBytes);
+
+    await kvPut(env.WEBAUTHN_CHALLENGES, regKey(challengeB64), JSON.stringify({ userId, challenge: challengeB64 }));
 
     const excludeCredentials = user ? (await credsByUser(env, userId)).map((cr) => ({ id: cr.credential_id })) : [];
 
@@ -80,14 +78,14 @@ app.post('/register/options', zValidator('json', regOptionsSchema), async (c) =>
       userID: isoUint8Array.fromUTF8String(userId),
       userName: email,
       userDisplayName: email,
-      challenge: isoUint8Array.fromUTF8String(challenge),
+      challenge: challengeBytes, // raw bytes as expected by simplewebauthn
       attestationType: 'none',
       authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' },
       excludeCredentials,
       supportedAlgorithmIDs: [-7, -257],
     });
 
-    return c.json({ success: true, data: { options, challenge, userId } });
+    return c.json({ success: true, data: { options, challenge: challengeB64, userId } });
   } catch (e) { logger.error('reg/options', e); return c.json({ success: false, error: 'Failed to generate registration options' }, 500); }
 });
 
@@ -120,10 +118,14 @@ app.post('/register/verify', zValidator('json', regVerifySchema), async (c) => {
 app.post('/auth/options', async (c) => {
   try {
     const env = c.env as unknown as Env;
-    const challenge = b64urlChallenge();
-    await kvPut(env.WEBAUTHN_CHALLENGES, authKey(challenge), challenge);
-    const options = await generateAuthenticationOptions({ rpID: env.RP_ID, challenge: isoUint8Array.fromUTF8String(challenge), userVerification: 'preferred' });
-    return c.json({ success: true, data: { options, challenge } });
+    const challengeBytes = randomBytes(32);
+    const challengeB64 = isoBase64URL.fromBuffer(challengeBytes);
+
+    await kvPut(env.WEBAUTHN_CHALLENGES, authKey(challengeB64), challengeB64);
+
+    const options = await generateAuthenticationOptions({ rpID: env.RP_ID, challenge: challengeBytes, userVerification: 'preferred' });
+
+    return c.json({ success: true, data: { options, challenge: challengeB64 } });
   } catch (e) { logger.error('auth/options', e); return c.json({ success: false, error: 'Failed to generate authentication options' }, 500); }
 });
 
