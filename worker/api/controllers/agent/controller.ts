@@ -77,24 +77,29 @@ export class CodingAgentController extends BaseController {
             const agentId = generateId();
             const modelConfigService = new ModelConfigService(env);
                                 
-            // Fetch all user model configs, api keys and agent instance at once
+            // Fetch all user model configs and agent instance at once
             const [userConfigsRecord, agentInstance] = await Promise.all([
                 modelConfigService.getUserModelConfigs(user.id),
                 getAgentStub(env, agentId, false, this.logger)
             ]);
-                                
-            // Convert Record to Map and extract only ModelConfig properties
-            const userModelConfigs = new Map();
+
+            // Build complete model configs map (merged defaults + user overrides)
+            // This ensures InferenceContext always has full config visibility for all operations
+            const userModelConfigs = new Map<string, ModelConfig>();
+            let userOverrideCount = 0;
+
             for (const [actionKey, mergedConfig] of Object.entries(userConfigsRecord)) {
+                const modelConfig: ModelConfig = {
+                    name: mergedConfig.name,
+                    max_tokens: mergedConfig.max_tokens,
+                    temperature: mergedConfig.temperature,
+                    reasoning_effort: mergedConfig.reasoning_effort,
+                    fallbackModel: mergedConfig.fallbackModel
+                };
+                userModelConfigs.set(actionKey, modelConfig);
+
                 if (mergedConfig.isUserOverride) {
-                    const modelConfig: ModelConfig = {
-                        name: mergedConfig.name,
-                        max_tokens: mergedConfig.max_tokens,
-                        temperature: mergedConfig.temperature,
-                        reasoning_effort: mergedConfig.reasoning_effort,
-                        fallbackModel: mergedConfig.fallbackModel
-                    };
-                    userModelConfigs.set(actionKey, modelConfig);
+                    userOverrideCount++;
                 }
             }
 
@@ -102,12 +107,14 @@ export class CodingAgentController extends BaseController {
                 userModelConfigs: Object.fromEntries(userModelConfigs),
                 agentId: agentId,
                 userId: user.id,
-                enableRealtimeCodeFix: false, // This costs us too much, so disabled it for now
+                enableRealtimeCodeFix: false, // Disabled to control costs
                 enableFastSmartCodeFix: false,
             }
-                                
+
             this.logger.info(`Initialized inference context for user ${user.id}`, {
-                modelConfigsCount: Object.keys(userModelConfigs).length,
+                totalConfigs: userModelConfigs.size,
+                userOverrides: userOverrideCount,
+                usingDefaults: userModelConfigs.size - userOverrideCount,
             });
 
             const { sandboxSessionId, templateDetails, selection } = await getTemplateForQuery(env, inferenceContext, query, body.images, this.logger);

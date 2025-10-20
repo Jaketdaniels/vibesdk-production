@@ -91,7 +91,7 @@ export type InferenceMetadata = {
 }
 
 export interface InferenceContext extends InferenceMetadata {
-    userModelConfigs?: Record<AgentActionKey, ModelConfig>;
+    userModelConfigs?: Partial<Record<AgentActionKey, ModelConfig>>;
     enableRealtimeCodeFix: boolean;
     enableFastSmartCodeFix: boolean;
 }
