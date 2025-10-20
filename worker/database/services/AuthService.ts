@@ -773,32 +773,74 @@ export class AuthService extends BaseService {
     
     /**
      * Validate token and return user (for middleware)
+     * Supports both JWT tokens and session IDs (from passkey auth)
      */
     async validateTokenAndGetUser(token: string, env: Env): Promise<AuthUserSession | null> {
         try {
-            const jwtUtils = JWTUtils.getInstance(env);
-            const payload = await jwtUtils.verifyToken(token);
-            
-            if (!payload || payload.type !== 'access') {
-                return null;
+            // Check if token is a UUID (session ID) or JWT
+            // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+            // JWT format: header.payload.signature (contains dots)
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
+
+            if (isUUID) {
+                // Handle session ID from passkey authentication
+                const session = await this.database
+                    .select()
+                    .from(schema.sessions)
+                    .where(and(
+                        eq(schema.sessions.id, token),
+                        eq(schema.sessions.isRevoked, false)
+                    ))
+                    .get();
+
+                if (!session) {
+                    logger.debug('Session not found or revoked', { sessionId: token });
+                    return null;
+                }
+
+                // Check if session is expired
+                if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
+                    logger.debug('Session expired', { sessionId: token, expiresAt: session.expiresAt });
+                    return null;
+                }
+
+                // Get user from database
+                const user = await this.getUserForAuth(session.userId);
+                if (!user) {
+                    logger.debug('User not found for session', { userId: session.userId });
+                    return null;
+                }
+
+                return {
+                    user,
+                    sessionId: session.id,
+                };
+            } else {
+                // Handle JWT token
+                const jwtUtils = JWTUtils.getInstance(env);
+                const payload = await jwtUtils.verifyToken(token);
+
+                if (!payload || payload.type !== 'access') {
+                    return null;
+                }
+
+                // Check if token is expired
+                if (payload.exp * 1000 < Date.now()) {
+                    logger.debug('Token expired', { exp: payload.exp });
+                    return null;
+                }
+
+                // Get user from database
+                const user = await this.getUserForAuth(payload.sub);
+                if (!user) {
+                    return null;
+                }
+
+                return {
+                    user,
+                    sessionId: payload.sessionId,
+                };
             }
-            
-            // Check if token is expired
-            if (payload.exp * 1000 < Date.now()) {
-                logger.debug('Token expired', { exp: payload.exp });
-                return null;
-            }
-            
-            // Get user from database
-            const user = await this.getUserForAuth(payload.sub);
-            if (!user) {
-                return null;
-            }
-            
-            return {
-                user,
-                sessionId: payload.sessionId,
-            };
         } catch (error) {
             logger.error('Token validation error', error);
             return null;

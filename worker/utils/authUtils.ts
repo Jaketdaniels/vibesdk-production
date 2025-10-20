@@ -71,7 +71,8 @@ export function extractTokenWithMetadata(
 		const cookies = parseCookies(cookieHeader);
 
 		// Check common cookie names in order of preference
-		const cookieNames = ['accessToken', 'auth_token', 'jwt'];
+		// 'session' is used by passkey authentication
+		const cookieNames = ['session', 'accessToken', 'auth_token', 'jwt'];
 		for (const cookieName of cookieNames) {
 			if (cookies[cookieName]) {
 				return {
