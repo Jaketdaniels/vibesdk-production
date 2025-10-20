@@ -19,6 +19,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parse, modify, applyEdits } from 'jsonc-parser';
 import Cloudflare from 'cloudflare';
+import { BuildLogger } from './build-logger.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -97,8 +98,10 @@ class CloudflareDeploymentManager {
 	private cloudflare: Cloudflare;
 	private aiGatewayCloudflare?: Cloudflare; // Separate SDK instance for AI Gateway operations
 	private conflictingVarsForCleanup: Record<string, string> | null = null; // For signal cleanup
+	private logger: BuildLogger;
 
 	constructor() {
+		this.logger = new BuildLogger(8); // 8 total deployment steps
 		this.validateEnvironment();
 		this.config = this.parseWranglerConfig();
 		this.extractConfigurationValues();
@@ -106,7 +109,7 @@ class CloudflareDeploymentManager {
 		this.cloudflare = new Cloudflare({
 			apiToken: this.env.CLOUDFLARE_API_TOKEN,
 		});
-		
+
 		// Set up signal handling for graceful cleanup
 		this.setupSignalHandlers();
 	}
@@ -1532,16 +1535,12 @@ class CloudflareDeploymentManager {
 	 * Builds the project (clean dist and run build)
 	 */
 	private async buildProject(): Promise<void> {
-		console.log('🔨 Building project...');
-
 		try {
-			// Run build
+			// Run build - capture output to keep terminal clean
 			execSync('bun run build', {
-				stdio: 'inherit',
+				stdio: 'pipe',
 				cwd: PROJECT_ROOT,
 			});
-
-			console.log('✅ Project build completed');
 		} catch (error) {
 			throw new DeploymentError(
 				'Failed to build project',
@@ -1554,15 +1553,12 @@ class CloudflareDeploymentManager {
 	 * Deploys the project using Wrangler
 	 */
 	private async wranglerDeploy(): Promise<void> {
-		console.log('🚀 Deploying to Cloudflare Workers...');
-
 		try {
+			// Capture output to keep terminal clean
 			execSync('wrangler deploy', {
-				stdio: 'inherit',
+				stdio: 'pipe',
 				cwd: PROJECT_ROOT,
 			});
-
-			console.log('✅ Wrangler deployment completed');
 		} catch (error) {
 			throw new DeploymentError(
 				'Failed to deploy with Wrangler',
@@ -1913,167 +1909,112 @@ class CloudflareDeploymentManager {
 	 * Main deployment orchestration method
 	 */
 	public async deploy(): Promise<void> {
-		console.log(
-			'🧡 Cloudflare Orange Build - Automated Deployment Starting...\n',
-		);
+		this.logger.header('🧡 Cloudflare Workers Deployment');
 
-		const startTime = Date.now();
         let customDomain: string | null = null;
 		let originalDockerfileContent: string | null = null;
 
 		try {
-			// Step 1: Early Configuration Updates (must happen before any wrangler commands)
-			// Note: cleanWranglerCache() removed to improve deployment speed by leveraging cache
-			// Only clean cache manually when debugging build issues: rm -rf .wrangler
-			console.log('\n📋 Step 1: Updating configuration files...');
-			
-			console.log('   🔧 Cleaning ARM64 development flags from Dockerfile');
+			// Step 1: Early Configuration Updates
+			this.logger.startStep('Preparing deployment configuration');
+
 			originalDockerfileContent = this.cleanDockerfileForDeployment();
-
-			console.log('   🔧 Updating package.json database commands');
 			this.updatePackageJsonDatabaseCommands();
-
-			console.log('   🔧 Updating wrangler.jsonc custom domain routes');
 			customDomain = await this.updateCustomDomainRoutes();
-
-			console.log('   🔧 Updating container instance types');
 			this.updateContainerInstanceTypes();
 
-			console.log('✅ Configuration files updated successfully!\n');
+			this.logger.completeStep('Configuration prepared');
 
-			// Step 1.5: Check dispatch namespace availability early
-			console.log('\n📋 Step 1.5: Checking dispatch namespace availability...');
+			// Step 2: Check dispatch namespace availability
+			this.logger.startStep('Verifying Workers for Platforms availability');
 			const dispatchNamespacesAvailable = await this.checkDispatchNamespaceAvailability();
-			
-			// Comment out dispatch_namespaces in wrangler.jsonc if not available
+
 			if (!dispatchNamespacesAvailable) {
 				this.commentOutDispatchNamespaces();
+				this.logger.completeStep('Workers for Platforms not available (optional)');
+			} else {
+				this.logger.completeStep('Workers for Platforms available');
 			}
-			console.log('✅ Dispatch namespace availability check completed!\n');
 
-			// Step 2: Update container configuration if needed
-			console.log('\n📋 Step 2: Updating container configuration...');
+			// Step 3: Update container configuration
+			this.logger.startStep('Configuring container instances');
 			this.updateContainerConfiguration();
 			this.updateDispatchNamespace(dispatchNamespacesAvailable);
+			this.logger.completeStep('Container configuration updated');
 
-			// Step 3: Resolve var/secret conflicts before deployment
-			console.log('\n📋 Step 3: Resolving var/secret conflicts...');
+			// Step 4: Resolve var/secret conflicts
+			this.logger.startStep('Resolving configuration conflicts');
 			const conflictingVars = await this.removeConflictingVars();
-			
-			// Store for potential cleanup on early exit
 			this.conflictingVarsForCleanup = conflictingVars;
+			this.logger.completeStep('Configuration conflicts resolved');
 
-			// Steps 2-4: Run all setup operations in parallel
+			// Step 5: Run setup operations in parallel (templates, build, namespaces, AI Gateway)
+			this.logger.startStep('Building project and preparing resources');
+
 			const operations: Promise<void>[] = [
 				this.deployTemplates(),
 				this.buildProject(),
 			];
 
-			// Only add dispatch namespace setup if available
 			if (dispatchNamespacesAvailable) {
 				operations.push(this.ensureDispatchNamespace());
 			}
 
-			// Add AI Gateway setup if gateway name is provided
 			if (this.env.CLOUDFLARE_AI_GATEWAY) {
 				operations.push(this.ensureAIGateway());
 			}
 
-			// Log the operations that will run in parallel
-			console.log(
-				'📋 Step 4: Running all setup operations in parallel...',
-			);
-			if (dispatchNamespacesAvailable) {
-				console.log('   🔄 Workers for Platforms namespace setup');
-			} else {
-				console.log('   ⏭️  Skipping Workers for Platforms namespace setup (not available)');
-			}
-			console.log('   🔄 Templates repository deployment');
-			console.log('   🔄 Project build (clean + compile)');
-			if (this.env.CLOUDFLARE_AI_GATEWAY) {
-				console.log('   🔄 AI Gateway setup and configuration');
-			}
-
 			await Promise.all(operations);
-
-			console.log(
-				'✅ Parallel setup and build operations completed!',
-			);
+			this.logger.completeStep('Build and resources prepared');
 
 			let deploymentSucceeded = false;
 			try {
-				// Step 5: Deploy with Wrangler (now without conflicts)
-				console.log('\n📋 Step 5: Deploying to Cloudflare Workers...');
+				// Step 6: Deploy with Wrangler
+				this.logger.startStep('Deploying to Cloudflare Workers');
 				await this.wranglerDeploy();
+				this.logger.completeStep('Deployed to Cloudflare Workers');
 
-				// Step 6: Update secrets (now no conflicts)
-				console.log('\n📋 Step 6: Updating production secrets...');
+				// Step 7: Update secrets
+				this.logger.startStep('Updating production secrets');
 				await this.updateSecrets();
+				this.logger.completeStep('Production secrets updated');
 
 				deploymentSucceeded = true;
 			} finally {
-				// Step 7: Always restore original vars (even if deployment failed)
-				console.log('\n📋 Step 7: Restoring original configuration...');
+				// Always restore original vars (even if deployment failed)
 				await this.restoreOriginalVars(conflictingVars);
-				
-				// Clear the backup since we've restored
 				this.conflictingVarsForCleanup = null;
 			}
 
             // Step 8: Run database migrations
-            console.log('\n📋 Step 8: Running database migrations...');
+			this.logger.startStep('Running database migrations');
             await this.runDatabaseMigrations();
+			this.logger.completeStep('Database migrations applied');
 
 			// Deployment complete
 			if (deploymentSucceeded) {
-				const duration = Math.round((Date.now() - startTime) / 1000);
-				console.log(
-					`\n🎉 Complete deployment finished successfully in ${duration}s!`,
-				);
-				console.log(
-					`✅ Your Cloudflare Orange Build platform is now live at https://${customDomain}! 🚀`,
-				);
-				
 				// Restore ARM64 flags for continued local development
 				if (originalDockerfileContent) {
-					console.log('\n🔄 Restoring local development configuration...');
 					this.restoreDockerfileARM64Flags(originalDockerfileContent);
 				}
+
+				this.logger.deploymentSuccess(customDomain || 'your-domain.workers.dev');
 			} else {
 				throw new DeploymentError('Deployment failed during wrangler deploy or secret update');
 			}
 		} catch (error) {
-			console.error('\n❌ Deployment failed:');
+			// Stop any running spinner
+			this.logger.stop();
 
-			if (error instanceof DeploymentError) {
-				console.error(`   ${error.message}`);
-				if (error.cause) {
-					console.error(`   Caused by: ${error.cause.message}`);
-				}
-			} else {
-				console.error(`   ${error}`);
-			}
+			const errorMessage = error instanceof DeploymentError
+				? error.message + (error.cause ? `\nCaused by: ${error.cause.message}` : '')
+				: String(error);
 
-			console.error('\n🔍 Troubleshooting tips:');
-			console.error(
-				'   - Verify all environment variables are correctly set',
-			);
-			console.error(
-				'   - Check your Cloudflare API token has required permissions',
-			);
-			console.error(
-				'   - Ensure your account has access to Workers for Platforms',
-			);
-			console.error('   - Verify the templates repository is accessible');
-			console.error(
-				'   - Check that bun is installed and build script works',
-			);
-
+			this.logger.deploymentFailure(errorMessage);
 			process.exit(1);
 		} finally {
 			// Always restore ARM64 flags if they were removed, even on deployment failure
 			if (originalDockerfileContent) {
-				console.log('\n🔄 Restoring local development configuration...');
 				this.restoreDockerfileARM64Flags(originalDockerfileContent);
 			}
 		}
