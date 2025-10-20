@@ -10,6 +10,9 @@ declare module './api-client' {
     verifyPasskeyReg(data: { credential: any; challenge: string; email?: string; displayName?: string }): Promise<any>;
     getPasskeyAuthOptions(): Promise<any>;
     verifyPasskeyAuth(data: { credential: any; challenge: string }): Promise<any>;
+    listPasskeyCredentials(): Promise<any>;
+    renamePasskey(data: { credentialId: string; name: string }): Promise<any>;
+    deletePasskey(data: { credentialId: string }): Promise<any>;
   }
 }
 
@@ -38,6 +41,29 @@ ApiClient.prototype.verifyPasskeyAuth = function (this: ApiClient, data: { crede
   // @ts-ignore
   return (this as any).request('/api/auth/passkey/auth/verify', {
     method: 'POST',
+    body: data,
+  });
+};
+
+ApiClient.prototype.listPasskeyCredentials = function (this: ApiClient) {
+  // @ts-ignore
+  return (this as any).request('/api/auth/passkey/credentials', {
+    method: 'GET',
+  });
+};
+
+ApiClient.prototype.renamePasskey = function (this: ApiClient, data: { credentialId: string; name: string }) {
+  // @ts-ignore
+  return (this as any).request('/api/auth/passkey/credentials', {
+    method: 'PATCH',
+    body: data,
+  });
+};
+
+ApiClient.prototype.deletePasskey = function (this: ApiClient, data: { credentialId: string }) {
+  // @ts-ignore
+  return (this as any).request('/api/auth/passkey/credentials', {
+    method: 'DELETE',
     body: data,
   });
 };
