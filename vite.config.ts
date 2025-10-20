@@ -19,7 +19,6 @@ export default defineConfig({
 			'react-router',
 		],
 		holdUntilCrawlEnd: false,
-		rollupOptions: {},
 	},
 	plugins: [
 		react(),
@@ -80,7 +79,9 @@ export default defineConfig({
 
 	build: {
 		sourcemap: 'hidden',
-		chunkSizeWarningLimit: 1000,
+		// Increased from 1000 to 2000 kB to account for Monaco Editor workers (ts.worker ~6MB, css.worker ~1MB)
+		// Monaco workers are inherently large and are lazy-loaded, so this is acceptable
+		chunkSizeWarningLimit: 2000,
 		minify: 'esbuild',
 		target: 'es2022',
 		cssMinify: 'esbuild',
