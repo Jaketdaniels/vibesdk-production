@@ -74,6 +74,7 @@
 		"@simplewebauthn/server": "^13.2.2",
 		"agents": "^0.2.14",
 		"class-variance-authority": "^0.7.1",
+		"cloudflare": "^5.2.0",
 		"clsx": "^2.1.1",
 		"date-fns": "^4.1.0",
 		"diff": "^8.0.2",
