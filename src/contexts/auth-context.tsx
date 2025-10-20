@@ -1,6 +1,6 @@
 /**
  * Enhanced Auth Context with Passkey-First Authentication
- * Provides WebAuthn passkey authentication with email/password fallback
+ * Following 2025 best practices with improved error handling and UX
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
@@ -101,6 +101,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Enhanced error message mapping for better UX
+  const mapPasskeyError = useCallback((error: any): string => {
+    if (error instanceof Error) {
+      switch (error.name) {
+        case 'NotAllowedError':
+          return 'Authentication was cancelled or timed out. Please try again.';
+        case 'NotSupportedError':
+          return 'Passkeys are not supported on this device or browser. Please try a different device.';
+        case 'InvalidStateError':
+          return 'A passkey already exists for this device. Please use the existing passkey to sign in.';
+        case 'SecurityError':
+          return 'Security error occurred. Please ensure you\'re on a secure connection and try again.';
+        case 'AbortError':
+          return 'Authentication was cancelled.';
+        case 'NetworkError':
+          return 'Network error occurred. Please check your connection and try again.';
+        default:
+          if (error.message.includes('CHALLENGE_EXPIRED')) {
+            return 'Authentication challenge expired. Please try again.';
+          }
+          if (error.message.includes('CREDENTIAL_NOT_FOUND')) {
+            return 'Passkey not recognized. Please try a different passkey or create a new one.';
+          }
+          return error.message || 'Authentication failed. Please try again.';
+      }
+    }
+    return 'Connection error. Please check your internet connection and try again.';
+  }, []);
+
   // Fetch auth providers configuration
   const fetchAuthProviders = useCallback(async () => {
     try {
@@ -196,21 +225,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, [fetchAuthProviders, checkAuth]);
 
-  // Passkey login (primary authentication method)
+  // Enhanced passkey login with better error handling and UX
   const loginWithPasskey = useCallback(async () => {
     setError(null);
     setIsLoading(true);
 
     try {
+      // Check WebAuthn support first
+      if (!window.PublicKeyCredential) {
+        throw new Error('Passkeys are not supported in this browser. Please use Chrome, Safari, or Edge.');
+      }
+
       // Get authentication options from server
       const optionsResponse = await apiClient.getPasskeyAuthOptions();
       
       if (!optionsResponse.success || !optionsResponse.data) {
-        throw new Error('Failed to get authentication options');
+        throw new Error(optionsResponse.error || 'Failed to get authentication options');
       }
 
-      // Start WebAuthn authentication
-      const authResponse = await startAuthentication(optionsResponse.data.options);
+      // Start WebAuthn authentication with timeout
+      const authResponse = await Promise.race([
+        startAuthentication(optionsResponse.data.options),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Authentication timed out after 60 seconds')), 60000)
+        )
+      ]) as any;
       
       // Verify authentication with server
       const verifyResponse = await apiClient.verifyPasskeyAuth({
@@ -233,32 +272,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const intendedUrl = getIntendedUrl();
         clearIntendedUrl();
         navigate(intendedUrl || '/');
+      } else {
+        throw new Error(verifyResponse.error || 'Authentication failed');
       }
     } catch (error) {
       console.error('Passkey login error:', error);
-      if (error instanceof Error) {
-        if (error.name === 'NotAllowedError') {
-          setError('Authentication was cancelled or timed out');
-        } else if (error.name === 'NotSupportedError') {
-          setError('Passkeys are not supported on this device');
-        } else {
-          setError(error.message || 'Authentication failed');
-        }
-      } else {
-        setError('Connection error. Please try again.');
-      }
+      const errorMessage = mapPasskeyError(error);
+      setError(errorMessage);
       throw error;
     } finally {
       setIsLoading(false);
     }
-  }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
+  }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl, mapPasskeyError]);
 
-  // Passkey registration (primary registration method)
+  // Enhanced passkey registration with better UX and error handling
   const registerPasskey = useCallback(async (email?: string, displayName?: string) => {
     setError(null);
     setIsLoading(true);
 
     try {
+      // Check WebAuthn support first
+      if (!window.PublicKeyCredential) {
+        throw new Error('Passkeys are not supported in this browser. Please use Chrome, Safari, or Edge.');
+      }
+
+      // Validate email if provided
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error('Please enter a valid email address.');
+      }
+
       // Get registration options from server
       const optionsResponse = await apiClient.getPasskeyRegOptions({
         email,
@@ -266,11 +308,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       
       if (!optionsResponse.success || !optionsResponse.data) {
-        throw new Error('Failed to get registration options');
+        throw new Error(optionsResponse.error || 'Failed to get registration options');
       }
 
-      // Start WebAuthn registration
-      const regResponse = await startRegistration(optionsResponse.data.options);
+      // Start WebAuthn registration with timeout
+      const regResponse = await Promise.race([
+        startRegistration(optionsResponse.data.options),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Registration timed out after 60 seconds')), 60000)
+        )
+      ]) as any;
       
       // Verify registration with server
       const verifyResponse = await apiClient.verifyPasskeyReg({
@@ -295,25 +342,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const intendedUrl = getIntendedUrl();
         clearIntendedUrl();
         navigate(intendedUrl || '/');
+      } else {
+        throw new Error(verifyResponse.error || 'Registration failed');
       }
     } catch (error) {
       console.error('Passkey registration error:', error);
-      if (error instanceof Error) {
-        if (error.name === 'NotAllowedError') {
-          setError('Registration was cancelled or timed out');
-        } else if (error.name === 'NotSupportedError') {
-          setError('Passkeys are not supported on this device');
-        } else {
-          setError(error.message || 'Registration failed');
-        }
-      } else {
-        setError('Connection error. Please try again.');
-      }
+      const errorMessage = mapPasskeyError(error);
+      setError(errorMessage);
       throw error;
     } finally {
       setIsLoading(false);
     }
-  }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl]);
+  }, [navigate, setupTokenRefresh, getIntendedUrl, clearIntendedUrl, mapPasskeyError]);
 
   // OAuth login method with redirect support
   const login = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
