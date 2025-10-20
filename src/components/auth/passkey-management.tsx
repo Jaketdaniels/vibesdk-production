@@ -65,12 +65,10 @@ export function PasskeyManagement({ className }: PasskeyManagementProps) {
     
     setIsLoading(true);
     try {
-      const response = await apiClient.request('/api/auth/passkey/credentials', {
-        method: 'GET',
-      });
+      const response = await apiClient.listPasskeyCredentials();
       
       if (response.success && response.data) {
-        setCredentials(response.data.credentials || []);
+        setCredentials(response.data.credentials ?? []);
       }
     } catch (error) {
       console.error('Failed to load passkeys:', error);
@@ -89,7 +87,7 @@ export function PasskeyManagement({ className }: PasskeyManagementProps) {
     setError(null);
     
     try {
-      await registerPasskey(user?.email || undefined, user?.name || user?.displayName || undefined);
+      await registerPasskey(user?.email || undefined, user?.displayName || undefined);
       await loadCredentials();
     } catch (error) {
       console.error('Failed to create passkey:', error);
@@ -105,10 +103,7 @@ export function PasskeyManagement({ className }: PasskeyManagementProps) {
     }
 
     try {
-      const response = await apiClient.request('/api/auth/passkey/credentials', {
-        method: 'DELETE',
-        body: { credentialId },
-      });
+      const response = await apiClient.deletePasskey({ credentialId });
       
       if (response.success) {
         setCredentials(credentials.filter(c => c.credentialId !== credentialId));
@@ -125,9 +120,9 @@ export function PasskeyManagement({ className }: PasskeyManagementProps) {
     if (!newName.trim()) return;
     
     try {
-      const response = await apiClient.request('/api/auth/passkey/credentials', {
-        method: 'PATCH',
-        body: { credentialId, name: newName.trim() },
+      const response = await apiClient.renamePasskey({ 
+        credentialId, 
+        name: newName.trim() 
       });
       
       if (response.success) {
