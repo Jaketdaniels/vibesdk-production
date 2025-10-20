@@ -1,0 +1,14 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	"name": "vibesdk-production-tail",
+	"main": "index.ts",
+	"compatibility_date": "2025-10-19",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"workers_dev": true,
+	"logpush": false,
+	"observability": {
+		"enabled": true
+	}
+}

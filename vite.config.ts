@@ -81,7 +81,7 @@ export default defineConfig({
 	cacheDir: '.cache/vite',
 
 	build: {
-		sourcemap: 'hidden',
+		sourcemap: process.env.NODE_ENV === 'development' ? 'hidden' : false,
 		// Increased from 1000 to 2000 kB to account for Monaco Editor workers (ts.worker ~6MB, css.worker ~1MB)
 		// Monaco workers are inherently large and are lazy-loaded, so this is acceptable
 		chunkSizeWarningLimit: 2000,
@@ -89,6 +89,7 @@ export default defineConfig({
 		target: 'es2022',
 		cssMinify: 'esbuild',
 		cssCodeSplit: true,
+		reportCompressedSize: false, // Skip gzip size analysis for faster builds
 		rollupOptions: {
 			output: {
 				manualChunks(id): string | undefined {

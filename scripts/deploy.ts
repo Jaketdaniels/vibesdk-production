@@ -1923,7 +1923,8 @@ class CloudflareDeploymentManager {
 
 		try {
 			// Step 1: Early Configuration Updates (must happen before any wrangler commands)
-            this.cleanWranglerCache();
+			// Note: cleanWranglerCache() removed to improve deployment speed by leveraging cache
+			// Only clean cache manually when debugging build issues: rm -rf .wrangler
 			console.log('\n📋 Step 1: Updating configuration files...');
 			
 			console.log('   🔧 Cleaning ARM64 development flags from Dockerfile');
