@@ -6,8 +6,7 @@
 	"scripts": {
 		"setup": "tsx scripts/setup.ts",
 		"dev": "DEV_MODE=true vite",
-		"prebuild": "wrangler types --include-runtime false",
-		"build": "tsc -b && vite build",
+		"build": "tsx scripts/build.ts",
 		"typecheck": "tsc -b",
 		"clean": "rm -rf dist .cache .wrangler tsconfig.tsbuildinfo",
 		"clean:cache": "rm -rf .cache .wrangler",
