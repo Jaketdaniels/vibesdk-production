@@ -12,6 +12,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPasskeyLogin: () => Promise<void>;
+  onPasskeyRegister: () => Promise<void>;
   error?: string | null;
   onClearError?: () => void;
   actionContext?: string; // e.g., "to star this app", "to save your workspace"
@@ -22,6 +23,7 @@ export function LoginModal({
   isOpen,
   onClose,
   onPasskeyLogin,
+  onPasskeyRegister,
   error,
   onClearError,
   actionContext,
@@ -120,6 +122,27 @@ export function LoginModal({
                   </div>
                   <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:translate-x-full transition-transform duration-700" />
                 </motion.button>
+
+                {/* Registration Link */}
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsLoading(true);
+                      try {
+                        await onPasskeyRegister();
+                      } catch (_) {
+                        // Error handled in auth context
+                      } finally {
+                        setIsLoading(false);
+                      }
+                    }}
+                    disabled={isLoading}
+                    className="text-sm text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50"
+                  >
+                    New here? Create a passkey
+                  </button>
+                </div>
 
                 {/* Footer */}
                 <p className="text-center text-xs text-text-tertiary mt-6">

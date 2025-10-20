@@ -32,7 +32,7 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [modalContext, setModalContext] = useState<string | undefined>();
   const [pendingAction, setPendingAction] = useState<(() => void) | undefined>();
-  const { loginWithPasskey, error, clearError, isAuthenticated } = useAuth();
+  const { loginWithPasskey, registerPasskey, error, clearError, isAuthenticated } = useAuth();
 
   const showAuthModal = useCallback((context?: string, onSuccess?: () => void) => {
     setModalContext(context);
@@ -67,6 +67,14 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
     }
   }, [loginWithPasskey]);
 
+  const handlePasskeyRegister = useCallback(async () => {
+    try {
+      await registerPasskey();
+    } catch (error) {
+      console.error('Passkey registration failed:', error);
+    }
+  }, [registerPasskey]);
+
   // Set up global auth modal trigger for API client
   useEffect(() => {
     setGlobalAuthModalTrigger(showAuthModal);
@@ -85,6 +93,7 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
         isOpen={isAuthModalOpen}
         onClose={hideAuthModal}
         onPasskeyLogin={handlePasskeyLogin}
+        onPasskeyRegister={handlePasskeyRegister}
         error={error}
         onClearError={clearError}
         actionContext={modalContext}

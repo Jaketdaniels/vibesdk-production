@@ -33,6 +33,7 @@ export function AuthButton({ className }: AuthButtonProps) {
 		isLoading,
 		error,
 		loginWithPasskey,
+		registerPasskey,
 		logout,
 		clearError,
 	} = useAuth();
@@ -61,6 +62,7 @@ export function AuthButton({ className }: AuthButtonProps) {
 					isOpen={showLoginModal}
 					onClose={() => setShowLoginModal(false)}
 					onPasskeyLogin={loginWithPasskey}
+					onPasskeyRegister={registerPasskey}
 					error={error}
 					onClearError={clearError}
 				/>
