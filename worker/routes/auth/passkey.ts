@@ -343,6 +343,20 @@ async function buildExcludedCredentials(
 }
 
 // =============================================================================
+// USERNAME GENERATION
+// =============================================================================
+
+/**
+ * Generate a friendly username for usernameless passkey registration
+ * Returns a short, memorable identifier instead of random UUIDs
+ */
+function generateFriendlyUsername(): string {
+	// Generate a 4-digit random number for uniqueness
+	const randomNum = Math.floor(1000 + Math.random() * 9000);
+	return `vibesdk-user-${randomNum}`;
+}
+
+// =============================================================================
 // ROUTE HANDLERS
 // =============================================================================
 
@@ -373,8 +387,8 @@ app.post('/register/options', zValidator('json', registrationOptionsSchema), asy
 			rpName: env.RP_NAME,
 			rpID: env.RP_ID,
 			userID: isoUint8Array.fromUTF8String(userId),
-			userName: email || `user_${userId}`,
-			userDisplayName: displayName || email || `User ${userId}`,
+			userName: email || generateFriendlyUsername(),
+			userDisplayName: displayName || email || 'VibeSDK User',
 			challenge: isoUint8Array.fromUTF8String(challenge),
 			attestationType: 'none',
 			excludeCredentials,
