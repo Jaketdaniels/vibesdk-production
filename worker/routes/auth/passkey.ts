@@ -1,756 +1,157 @@
 /**
- * Passkey Authentication Routes for Cloudflare Workers
- * Implements WebAuthn registration and authentication using SimpleWebAuthn v13
- * Following 2025 best practices for discoverable credentials and UX
+ * Passkey Authentication Routes (strict conventional flows)
+ * - Registration requires email; userName = email (lowercased)
+ * - Discoverable credentials with residentKey required
+ * - Consistent, single-use challenges; clear error codes
  */
 
 import { Hono } from 'hono';
 import {
-	generateRegistrationOptions,
-	generateAuthenticationOptions,
-	verifyRegistrationResponse,
-	verifyAuthenticationResponse,
+  generateRegistrationOptions,
+  generateAuthenticationOptions,
+  verifyRegistrationResponse,
+  verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
-import type {
-	AuthenticatorTransport,
-	RegistrationResponseJSON,
-	AuthenticationResponseJSON,
-} from '@simplewebauthn/server';
+import type { AuthenticatorTransport, RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
 import { isoUint8Array, isoBase64URL } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { createLogger } from '../../logger';
 
-// =============================================================================
-// TYPE DEFINITIONS
-// =============================================================================
-
 const logger = createLogger('PasskeyAuth');
 
-interface CloudflareBindings {
-	DB: D1Database;
-	WEBAUTHN_CHALLENGES: KVNamespace;
-	RP_ID: string;
-	RP_NAME: string;
-	ORIGIN: string;
-}
-
 type AppEnv = {
-	Bindings: CloudflareBindings;
+  Bindings: Env;
 };
 
-interface UserRecord {
-	id: string;
-	email: string | null;
-	name: string | null;
-	display_name: string | null;
-	created_at: string;
-	updated_at: string;
-}
+interface UserRecord { id: string; email: string | null; name: string | null; display_name: string | null; created_at: string; updated_at: string; }
+interface CredentialRecord { user_id: string; credential_id: string; public_key: string; counter: number; transports: string | null; aaguid: string | null; created_at: string; }
+interface SessionData { id: string; user_id: string; expires_at: string; }
 
-interface CredentialRecord {
-	user_id: string;
-	credential_id: string;
-	public_key: string;
-	counter: number;
-	transports: string | null;
-	aaguid: string | null;
-	created_at: string;
-}
-
-interface SessionData {
-	id: string;
-	user_id: string;
-	expires_at: string;
-}
-
-interface CreateUserData {
-	id: string;
-	email?: string;
-	displayName?: string;
-}
-
-interface SaveCredentialData {
-	userId: string;
-	credentialId: string;
-	publicKey: string;
-	counter: number;
-	transports?: string[];
-	aaguid?: string;
-}
-
-// =============================================================================
-// VALIDATION SCHEMAS
-// =============================================================================
-
-const registrationOptionsSchema = z.object({
-	email: z.string().email().optional(),
-	displayName: z.string().min(1).optional(),
+const regOptionsSchema = z.object({ email: z.string().email() }); // email required
+const regVerifySchema = z.object({
+  credential: z.object({ id: z.string(), rawId: z.string(), response: z.object({ attestationObject: z.string(), clientDataJSON: z.string(), transports: z.array(z.enum(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'])).optional(), }), type: z.literal('public-key'), clientExtensionResults: z.object({}).passthrough().optional(), authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(), }) as z.ZodType<RegistrationResponseJSON>,
+  challenge: z.string(), email: z.string().email(),
+});
+const authVerifySchema = z.object({
+  credential: z.object({ id: z.string(), rawId: z.string(), response: z.object({ authenticatorData: z.string(), clientDataJSON: z.string(), signature: z.string(), userHandle: z.string().optional(), }), type: z.literal('public-key'), clientExtensionResults: z.object({}).passthrough().optional(), authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(), }) as z.ZodType<AuthenticationResponseJSON>,
+  challenge: z.string(),
 });
 
-const registrationVerificationSchema = z.object({
-	credential: z.object({
-		id: z.string(),
-		rawId: z.string(),
-		response: z.object({
-			attestationObject: z.string(),
-			clientDataJSON: z.string(),
-			transports: z.array(z.enum(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'])).optional(),
-		}),
-		type: z.literal('public-key'),
-		clientExtensionResults: z.object({}).passthrough().optional(),
-		authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(),
-	}) as z.ZodType<RegistrationResponseJSON>,
-	challenge: z.string(),
-	email: z.string().email().optional(),
-	displayName: z.string().optional(),
-});
+const CHALLENGE_TTL_SECONDS = 300;
 
-const authenticationVerificationSchema = z.object({
-	credential: z.object({
-		id: z.string(),
-		rawId: z.string(),
-		response: z.object({
-			authenticatorData: z.string(),
-			clientDataJSON: z.string(),
-			signature: z.string(),
-			userHandle: z.string().optional(),
-		}),
-		type: z.literal('public-key'),
-		clientExtensionResults: z.object({}).passthrough().optional(),
-		authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(),
-	}) as z.ZodType<AuthenticationResponseJSON>,
-	challenge: z.string(),
-});
+function b64urlChallenge(): string { const bytes = new Uint8Array(32); crypto.getRandomValues(bytes); return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,''); }
+function regKey(ch: string): string { return `reg:${ch}`; }
+function authKey(ch: string): string { return `auth:${ch}`; }
+async function kvPut(kv: KVNamespace, key: string, value: string, ttl = CHALLENGE_TTL_SECONDS) { await kv.put(key, value, { expirationTtl: ttl }); }
+async function kvGet(kv: KVNamespace, key: string) { return kv.get(key); }
+async function kvDel(kv: KVNamespace, key: string) { await kv.delete(key); }
 
-// =============================================================================
-// CHALLENGE MANAGEMENT
-// =============================================================================
+async function findUserByEmail(env: Env, email: string): Promise<UserRecord | null> { const r = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first(); return r as UserRecord | null; }
+async function findUserById(env: Env, id: string): Promise<UserRecord | null> { const r = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first(); return r as UserRecord | null; }
+async function insertUser(env: Env, id: string, email: string): Promise<UserRecord | null> { const r = await env.DB.prepare(`INSERT INTO users (id, email, name, display_name, created_at, updated_at) VALUES (?, ?, NULL, NULL, datetime('now'), datetime('now')) RETURNING *`).bind(id, email).first(); return r as UserRecord | null; }
 
-const CHALLENGE_TTL_SECONDS = 300; // 5 minutes
+async function credsByUser(env: Env, userId: string): Promise<CredentialRecord[]> { const rs = await env.DB.prepare('SELECT * FROM webauthn_credentials WHERE user_id = ?').bind(userId).all<CredentialRecord>(); return rs.results ?? []; }
+async function credById(env: Env, id: string): Promise<CredentialRecord | null> { const r = await env.DB.prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?').bind(id).first(); return r as CredentialRecord | null; }
+async function insertCred(env: Env, d: { userId: string; id: string; publicKey: string; counter: number; transports?: string[]; aaguid?: string; }) { await env.DB.prepare(`INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter, transports, aaguid, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).bind(d.userId, d.id, d.publicKey, d.counter, d.transports ? JSON.stringify(d.transports) : null, d.aaguid || null).run(); }
+async function updateCounter(env: Env, id: string, c: number) { await env.DB.prepare(`UPDATE webauthn_credentials SET counter = ?, last_used_at = datetime('now') WHERE credential_id = ?`).bind(c, id).run(); }
 
-function generateChallenge(): string {
-	const randomBytes = new Uint8Array(32);
-	crypto.getRandomValues(randomBytes);
-	return btoa(String.fromCharCode(...randomBytes))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=/g, '');
-}
-
-function buildRegistrationChallengeKey(challenge: string): string {
-	return `reg-challenge:${challenge}`;
-}
-
-function buildAuthenticationChallengeKey(challenge: string): string {
-	return `auth:${challenge}`;
-}
-
-async function storeChallenge(
-	env: CloudflareBindings,
-	key: string,
-	challenge: string,
-	ttlSeconds: number = CHALLENGE_TTL_SECONDS
-): Promise<void> {
-	await env.WEBAUTHN_CHALLENGES.put(key, challenge, { expirationTtl: ttlSeconds });
-}
-
-async function retrieveChallenge(env: CloudflareBindings, key: string): Promise<string | null> {
-	return await env.WEBAUTHN_CHALLENGES.get(key);
-}
-
-async function deleteChallenge(env: CloudflareBindings, key: string): Promise<void> {
-	await env.WEBAUTHN_CHALLENGES.delete(key);
-}
-
-async function storeRegistrationChallenge(
-	env: CloudflareBindings,
-	userId: string,
-	challenge: string,
-	ttlSeconds: number = CHALLENGE_TTL_SECONDS
-): Promise<void> {
-	const key = buildRegistrationChallengeKey(challenge);
-	const data = JSON.stringify({ userId, challenge, createdAt: Date.now() });
-	await env.WEBAUTHN_CHALLENGES.put(key, data, { expirationTtl: ttlSeconds });
-}
-
-async function findRegistrationChallenge(
-	env: CloudflareBindings,
-	challenge: string
-): Promise<{ storedChallenge: string; challengeKey: string; userId: string } | null> {
-	const key = buildRegistrationChallengeKey(challenge);
-	const data = await env.WEBAUTHN_CHALLENGES.get(key);
-
-	if (!data) {
-		return null;
-	}
-
-	const parsed = JSON.parse(data);
-	return {
-		storedChallenge: parsed.challenge,
-		challengeKey: key,
-		userId: parsed.userId,
-	};
-}
-
-// =============================================================================
-// DATABASE OPERATIONS - USERS
-// =============================================================================
-
-async function findUserByEmail(env: CloudflareBindings, email: string): Promise<UserRecord | null> {
-	const result = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
-	return result as UserRecord | null;
-}
-
-async function findUserById(env: CloudflareBindings, id: string): Promise<UserRecord | null> {
-	const result = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first();
-	return result as UserRecord | null;
-}
-
-async function insertUser(env: CloudflareBindings, data: CreateUserData): Promise<UserRecord | null> {
-	const result = await env.DB.prepare(`
-		INSERT INTO users (id, email, name, display_name, created_at, updated_at)
-		VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
-		RETURNING *
-	`)
-		.bind(data.id, data.email || null, data.displayName || null, data.displayName || null)
-		.first();
-	return result as UserRecord | null;
-}
-
-// =============================================================================
-// DATABASE OPERATIONS - CREDENTIALS
-// =============================================================================
-
-async function findCredentialsByUserId(env: CloudflareBindings, userId: string): Promise<CredentialRecord[]> {
-	const results = await env.DB.prepare('SELECT * FROM webauthn_credentials WHERE user_id = ?')
-		.bind(userId)
-		.all<CredentialRecord>();
-	return results.results ?? [];
-}
-
-async function findCredentialById(
-	env: CloudflareBindings,
-	credentialId: string
-): Promise<CredentialRecord | null> {
-	const result = await env.DB.prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?')
-		.bind(credentialId)
-		.first();
-	return result as CredentialRecord | null;
-}
-
-async function insertCredential(env: CloudflareBindings, data: SaveCredentialData): Promise<void> {
-	await env.DB.prepare(`
-		INSERT INTO webauthn_credentials
-		(user_id, credential_id, public_key, counter, transports, aaguid, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-	`)
-		.bind(
-			data.userId,
-			data.credentialId,
-			data.publicKey,
-			data.counter,
-			data.transports ? JSON.stringify(data.transports) : null,
-			data.aaguid || null
-		)
-		.run();
-}
-
-async function updateCredentialCounter(
-	env: CloudflareBindings,
-	credentialId: string,
-	counter: number
-): Promise<void> {
-	await env.DB.prepare(`
-		UPDATE webauthn_credentials
-		SET counter = ?, last_used_at = datetime('now')
-		WHERE credential_id = ?
-	`)
-		.bind(counter, credentialId)
-		.run();
-}
-
-// =============================================================================
-// SESSION MANAGEMENT
-// =============================================================================
-
-const SESSION_DURATION_HOURS = 24;
-
-function generateSessionId(): string {
-	return crypto.randomUUID();
-}
-
-function generateUserId(): string {
-	return crypto.randomUUID();
-}
-
-function calculateSessionExpiry(): Date {
-	return new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
-}
-
-async function hashToken(token: string): Promise<string> {
-	const encoder = new TextEncoder();
-	const data = encoder.encode(token);
-	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-	const hashArray = Array.from(new Uint8Array(hashBuffer));
-	return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function createSession(
-	env: CloudflareBindings,
-	userId: string,
-	deviceInfo?: string
-): Promise<SessionData> {
-	const sessionId = generateSessionId();
-	const expiresAt = calculateSessionExpiry();
-
-	const accessToken = crypto.randomUUID();
-	const refreshToken = crypto.randomUUID();
-	const accessTokenHash = await hashToken(accessToken);
-	const refreshTokenHash = await hashToken(refreshToken);
-
-	await env.DB.prepare(`
-		INSERT INTO sessions (id, user_id, access_token_hash, refresh_token_hash, expires_at, created_at, device_info, is_revoked)
-		VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 0)
-	`)
-		.bind(sessionId, userId, accessTokenHash, refreshTokenHash, Math.floor(expiresAt.getTime() / 1000), deviceInfo || 'passkey-device')
-		.run();
-
-	return {
-		id: sessionId,
-		user_id: userId,
-		expires_at: expiresAt.toISOString(),
-	};
-}
-
-function buildSessionCookie(sessionId: string, expiresAt: string): string {
-	const expires = new Date(expiresAt);
-	return `session=${sessionId}; HttpOnly; Secure; SameSite=Lax; Path=/; Expires=${expires.toUTCString()}`;
-}
-
-// =============================================================================
-// CREDENTIAL HELPERS
-// =============================================================================
-
-async function buildExcludedCredentials(
-	env: CloudflareBindings,
-	userId: string
-): Promise<{ id: string; transports?: AuthenticatorTransport[] }[]> {
-	const credentials = await findCredentialsByUserId(env, userId);
-	return credentials.map((cred) => ({
-		id: cred.credential_id,
-		transports: cred.transports ? (JSON.parse(cred.transports) as AuthenticatorTransport[]) : undefined,
-	}));
-}
-
-// =============================================================================
-// USERNAME GENERATION - IMPROVED FOR 2025 BEST PRACTICES
-// =============================================================================
-
-/**
- * Generate a human-friendly username for usernameless passkey registration
- * Uses memorable words + numbers instead of UUIDs for better UX
- * Following 2025 best practices for discoverable credentials
- */
-function generateFriendlyUsername(): string {
-	// Arrays of friendly words for memorable usernames
-	const adjectives = [
-		'swift', 'clever', 'bright', 'cosmic', 'digital', 'quantum', 'cyber', 'nexus',
-		'azure', 'stellar', 'prime', 'ultra', 'meta', 'flux', 'zen', 'nova'
-	];
-	
-	const nouns = [
-		'user', 'developer', 'creator', 'builder', 'maker', 'coder', 'designer',
-		'architect', 'pioneer', 'explorer', 'innovator', 'engineer', 'artist'
-	];
-
-	// Generate random selections
-	const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
-	const noun = nouns[Math.floor(Math.random() * nouns.length)];
-	const number = Math.floor(100 + Math.random() * 900); // 3-digit number
-
-	return `${adjective}-${noun}-${number}`;
-}
-
-// =============================================================================
-// ROUTE HANDLERS - ENHANCED FOR 2025 BEST PRACTICES
-// =============================================================================
+async function createSession(env: Env, userId: string): Promise<SessionData> { const id = crypto.randomUUID(); const exp = new Date(Date.now() + 24 * 60 * 60 * 1000); await env.DB.prepare(`INSERT INTO sessions (id, user_id, access_token_hash, refresh_token_hash, expires_at, created_at, device_info, is_revoked) VALUES (?, ?, ?, ?, ?, datetime('now'), ?, 0)`).bind(id, userId, '', '', Math.floor(exp.getTime()/1000), 'passkey').run(); return { id, user_id: userId, expires_at: exp.toISOString() }; }
+function cookie(sessionId: string, expiresAt: string): string { const exp = new Date(expiresAt); return `session=${sessionId}; HttpOnly; Secure; SameSite=Lax; Path=/; Expires=${exp.toUTCString()}`; }
 
 const app = new Hono<AppEnv>();
 
-// Registration: Generate options with improved discoverable credentials setup
-app.post('/register/options', zValidator('json', registrationOptionsSchema), async (c) => {
-	try {
-		const { email, displayName } = c.req.valid('json');
-		const env = c.env;
+app.post('/register/options', zValidator('json', regOptionsSchema), async (c) => {
+  try {
+    const env = c.env as unknown as Env;
+    const email = c.req.valid('json').email.trim().toLowerCase();
 
-		let userId = generateUserId();
-		let user: UserRecord | null = null;
+    let user = await findUserByEmail(env, email);
+    let userId = user?.id ?? crypto.randomUUID();
 
-		if (email) {
-			user = await findUserByEmail(env, email);
-			if (user) {
-				userId = user.id;
-			}
-		}
+    const challenge = b64urlChallenge();
+    await kvPut(env.WEBAUTHN_CHALLENGES, regKey(challenge), JSON.stringify({ userId, challenge }));
 
-		const challenge = generateChallenge();
-		await storeRegistrationChallenge(env, userId, challenge);
+    const excludeCredentials = user ? (await credsByUser(env, userId)).map((cr) => ({ id: cr.credential_id })) : [];
 
-		const excludeCredentials = user ? await buildExcludedCredentials(env, userId) : [];
+    const options = await generateRegistrationOptions({
+      rpName: env.RP_NAME,
+      rpID: env.RP_ID,
+      userID: isoUint8Array.fromUTF8String(userId),
+      userName: email,
+      userDisplayName: email,
+      challenge: isoUint8Array.fromUTF8String(challenge),
+      attestationType: 'none',
+      authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' },
+      excludeCredentials,
+      supportedAlgorithmIDs: [-7, -257],
+    });
 
-		// Enhanced options following 2025 best practices
-		const options = await generateRegistrationOptions({
-			rpName: env.RP_NAME,
-			rpID: env.RP_ID,
-			userID: isoUint8Array.fromUTF8String(userId),
-			userName: email || generateFriendlyUsername(), // Improved username generation
-			userDisplayName: displayName || email || `VibeSDK User`,
-			challenge: isoUint8Array.fromUTF8String(challenge),
-			attestationType: 'none', // Recommended for better compatibility
-			excludeCredentials,
-			// Enhanced authenticator selection for discoverable credentials
-			authenticatorSelection: {
-				// Prefer discoverable credentials for usernameless auth
-				residentKey: 'required', // Force discoverable credentials
-				requireResidentKey: true, // Legacy compatibility
-				userVerification: 'preferred', // Allow biometric verification
-				// Don't restrict to platform - allow security keys too
-				authenticatorAttachment: undefined,
-			},
-			// Enhanced algorithm support
-			supportedAlgorithmIDs: [-7, -257, -258, -259], // ES256, RS256, RS384, RS512
-		});
-
-		logger.info('Registration options generated', {
-			userId,
-			email: email || 'usernameless',
-			residentKey: 'required',
-		});
-
-		return c.json({
-			success: true,
-			data: {
-				options,
-				challenge,
-				userId,
-			},
-		});
-	} catch (error) {
-		logger.error('Registration options generation failed', {
-			error: error instanceof Error ? error.message : String(error),
-			email: c.req.valid('json').email || 'none',
-		});
-		return c.json(
-			{
-				success: false,
-				error: 'Failed to generate registration options',
-				details: error instanceof Error ? error.message : 'Unknown error',
-			},
-			500
-		);
-	}
+    return c.json({ success: true, data: { options, challenge, userId } });
+  } catch (e) { logger.error('reg/options', e); return c.json({ success: false, error: 'Failed to generate registration options' }, 500); }
 });
 
-// Registration: Verify credential with enhanced error handling
-app.post('/register/verify', zValidator('json', registrationVerificationSchema), async (c) => {
-	try {
-		const { credential, challenge, email, displayName } = c.req.valid('json');
-		const env = c.env;
+app.post('/register/verify', zValidator('json', regVerifySchema), async (c) => {
+  try {
+    const env = c.env as unknown as Env;
+    const { credential, challenge, email } = c.req.valid('json');
 
-		const challengeData = await findRegistrationChallenge(env, challenge);
-		if (!challengeData) {
-			return c.json(
-				{
-					success: false,
-					error: 'Invalid or expired challenge',
-					code: 'CHALLENGE_EXPIRED',
-				},
-				400
-			);
-		}
+    const regData = await kvGet(env.WEBAUTHN_CHALLENGES, regKey(challenge));
+    if (!regData) return c.json({ success: false, error: 'Invalid or expired challenge', code: 'CHALLENGE_EXPIRED' }, 400);
+    const { userId, challenge: storedChallenge } = JSON.parse(regData);
 
-		const { storedChallenge, challengeKey, userId } = challengeData;
+    const vr = await verifyRegistrationResponse({ response: credential, expectedChallenge: storedChallenge, expectedOrigin: env.ORIGIN, expectedRPID: env.RP_ID, requireUserVerification: false });
+    if (!vr.verified || !vr.registrationInfo) { await kvDel(env.WEBAUTHN_CHALLENGES, regKey(challenge)); return c.json({ success: false, error: 'Passkey registration verification failed', code: 'VERIFICATION_FAILED' }, 400); }
 
-		const verification = await verifyRegistrationResponse({
-			response: credential,
-			expectedChallenge: storedChallenge,
-			expectedOrigin: env.ORIGIN,
-			expectedRPID: env.RP_ID,
-			requireUserVerification: false, // More flexible for better UX
-		});
+    await kvDel(env.WEBAUTHN_CHALLENGES, regKey(challenge));
 
-		if (!verification.verified || !verification.registrationInfo) {
-			await deleteChallenge(env, challengeKey);
-			logger.warn('Registration verification failed', {
-				userId,
-				email: email || 'usernameless',
-				reason: 'Verification failed',
-			});
-			return c.json(
-				{
-					success: false,
-					error: 'Passkey registration verification failed',
-					code: 'VERIFICATION_FAILED',
-				},
-				400
-			);
-		}
+    let user = await findUserById(env, userId);
+    if (!user) user = await insertUser(env, userId, email);
+    if (!user) return c.json({ success: false, error: 'Failed to create user account', code: 'USER_CREATION_FAILED' }, 500);
 
-		await deleteChallenge(env, challengeKey);
+    const { credential: cr, aaguid } = vr.registrationInfo;
+    await insertCred(env, { userId: user.id, id: cr.id, publicKey: isoBase64URL.fromBuffer(cr.publicKey), counter: cr.counter, transports: credential.response.transports, aaguid });
 
-		const { credential: webAuthnCredential, aaguid } = verification.registrationInfo;
-
-		let user = await findUserById(env, userId);
-		if (!user) {
-			user = await insertUser(env, { id: userId, email, displayName });
-		}
-
-		if (!user) {
-			return c.json(
-				{
-					success: false,
-					error: 'Failed to create user account',
-					code: 'USER_CREATION_FAILED',
-				},
-				500
-			);
-		}
-
-		// Store the credential with enhanced metadata
-		await insertCredential(env, {
-			userId: user.id,
-			credentialId: webAuthnCredential.id,
-			publicKey: isoBase64URL.fromBuffer(webAuthnCredential.publicKey),
-			counter: webAuthnCredential.counter,
-			transports: credential.response.transports,
-			aaguid,
-		});
-
-		const session = await createSession(env, user.id, 'passkey-registration');
-		const sessionCookie = buildSessionCookie(session.id, session.expires_at);
-
-		logger.info('Passkey registered successfully', {
-			userId: user.id,
-			email: user.email || 'usernameless',
-			credentialId: webAuthnCredential.id,
-			aaguid,
-		});
-
-		return c.json(
-			{
-				success: true,
-				data: {
-					user: {
-						id: user.id,
-						email: user.email,
-						name: user.name,
-						displayName: user.display_name,
-						createdAt: user.created_at,
-					},
-					sessionId: session.id,
-					expiresAt: new Date(session.expires_at),
-				},
-			},
-			200,
-			{
-				'Set-Cookie': sessionCookie,
-			}
-		);
-	} catch (error) {
-		logger.error('Registration verification failed', {
-			error: error instanceof Error ? error.message : String(error),
-			email: c.req.valid('json').email || 'none',
-		});
-		return c.json(
-			{
-				success: false,
-				error: 'Registration verification failed',
-				code: 'INTERNAL_ERROR',
-				details: error instanceof Error ? error.message : 'Unknown error',
-			},
-			500
-		);
-	}
+    const sess = await createSession(env, user.id);
+    return c.json({ success: true, data: { user: { id: user.id, email: user.email, displayName: user.display_name }, sessionId: sess.id, expiresAt: new Date(sess.expires_at) } }, 200, { 'Set-Cookie': cookie(sess.id, sess.expires_at) });
+  } catch (e) { logger.error('reg/verify', e); return c.json({ success: false, error: 'Registration verification failed', code: 'INTERNAL_ERROR' }, 500); }
 });
 
-// Authentication: Generate options for discoverable credentials
 app.post('/auth/options', async (c) => {
-	try {
-		const env = c.env;
-
-		const challenge = generateChallenge();
-		const challengeKey = buildAuthenticationChallengeKey(challenge);
-		await storeChallenge(env, challengeKey, challenge);
-
-		// Enhanced options for discoverable credentials and conditional UI
-		const options = await generateAuthenticationOptions({
-			rpID: env.RP_ID,
-			challenge: isoUint8Array.fromUTF8String(challenge),
-			userVerification: 'preferred',
-			// Don't specify allowCredentials for discoverable credentials
-			// This enables usernameless authentication
-		});
-
-		logger.info('Authentication options generated', {
-			discoverableCredentials: true,
-			userVerification: 'preferred',
-		});
-
-		return c.json({
-			success: true,
-			data: {
-				options,
-				challenge,
-			},
-		});
-	} catch (error) {
-		logger.error('Authentication options generation failed', {
-			error: error instanceof Error ? error.message : String(error),
-		});
-		return c.json(
-			{
-				success: false,
-				error: 'Failed to generate authentication options',
-				details: error instanceof Error ? error.message : 'Unknown error',
-			},
-			500
-		);
-	}
+  try {
+    const env = c.env as unknown as Env;
+    const challenge = b64urlChallenge();
+    await kvPut(env.WEBAUTHN_CHALLENGES, authKey(challenge), challenge);
+    const options = await generateAuthenticationOptions({ rpID: env.RP_ID, challenge: isoUint8Array.fromUTF8String(challenge), userVerification: 'preferred' });
+    return c.json({ success: true, data: { options, challenge } });
+  } catch (e) { logger.error('auth/options', e); return c.json({ success: false, error: 'Failed to generate authentication options' }, 500); }
 });
 
-// Authentication: Verify assertion with enhanced error handling
-app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), async (c) => {
-	try {
-		const { credential, challenge } = c.req.valid('json');
-		const env = c.env;
+app.post('/auth/verify', zValidator('json', authVerifySchema), async (c) => {
+  try {
+    const env = c.env as unknown as Env;
+    const { credential, challenge } = c.req.valid('json');
 
-		const challengeKey = buildAuthenticationChallengeKey(challenge);
-		const storedChallenge = await retrieveChallenge(env, challengeKey);
+    const stored = await kvGet(env.WEBAUTHN_CHALLENGES, authKey(challenge));
+    if (!stored || stored !== challenge) return c.json({ success: false, error: 'Invalid or expired challenge', code: 'CHALLENGE_EXPIRED' }, 400);
 
-		if (!storedChallenge || storedChallenge !== challenge) {
-			return c.json(
-				{
-					success: false,
-					error: 'Invalid or expired challenge',
-					code: 'CHALLENGE_EXPIRED',
-				},
-				400
-			);
-		}
+    const rec = await credById(env, credential.id);
+    if (!rec) { await kvDel(env.WEBAUTHN_CHALLENGES, authKey(challenge)); return c.json({ success: false, error: 'Passkey not recognized', code: 'CREDENTIAL_NOT_FOUND' }, 400); }
 
-		const credentialRecord = await findCredentialById(env, credential.id);
-		if (!credentialRecord) {
-			await deleteChallenge(env, challengeKey);
-			logger.warn('Authentication failed: credential not found', {
-				credentialId: credential.id,
-			});
-			return c.json(
-				{
-					success: false,
-					error: 'Passkey not recognized',
-					code: 'CREDENTIAL_NOT_FOUND',
-				},
-				400
-			);
-		}
+    const user = await findUserById(env, rec.user_id);
+    if (!user) { await kvDel(env.WEBAUTHN_CHALLENGES, authKey(challenge)); return c.json({ success: false, error: 'User account not found', code: 'USER_NOT_FOUND' }, 400); }
 
-		const user = await findUserById(env, credentialRecord.user_id);
-		if (!user) {
-			await deleteChallenge(env, challengeKey);
-			logger.error('Authentication failed: user not found', {
-				userId: credentialRecord.user_id,
-				credentialId: credential.id,
-			});
-			return c.json(
-				{
-					success: false,
-					error: 'User account not found',
-					code: 'USER_NOT_FOUND',
-				},
-				400
-			);
-		}
+    const vr = await verifyAuthenticationResponse({ response: credential, expectedChallenge: stored, expectedOrigin: env.ORIGIN, expectedRPID: env.RP_ID, credential: { id: rec.credential_id, publicKey: isoBase64URL.toBuffer(rec.public_key), counter: rec.counter, transports: rec.transports ? (JSON.parse(rec.transports) as AuthenticatorTransport[]) : undefined, }, requireUserVerification: false });
 
-		const verification = await verifyAuthenticationResponse({
-			response: credential,
-			expectedChallenge: storedChallenge,
-			expectedOrigin: env.ORIGIN,
-			expectedRPID: env.RP_ID,
-			credential: {
-				id: credentialRecord.credential_id,
-				publicKey: isoBase64URL.toBuffer(credentialRecord.public_key),
-				counter: credentialRecord.counter,
-				transports: credentialRecord.transports
-					? (JSON.parse(credentialRecord.transports) as AuthenticatorTransport[])
-					: undefined,
-			},
-			requireUserVerification: false, // More flexible for better UX
-		});
+    if (!vr.verified) { await kvDel(env.WEBAUTHN_CHALLENGES, authKey(challenge)); return c.json({ success: false, error: 'Passkey authentication failed', code: 'VERIFICATION_FAILED' }, 400); }
 
-		if (!verification.verified) {
-			await deleteChallenge(env, challengeKey);
-			logger.warn('Authentication verification failed', {
-				userId: user.id,
-				credentialId: credential.id,
-			});
-			return c.json(
-				{
-					success: false,
-					error: 'Passkey authentication failed',
-					code: 'VERIFICATION_FAILED',
-				},
-				400
-			);
-		}
+    await kvDel(env.WEBAUTHN_CHALLENGES, authKey(challenge));
+    const newCounter = Math.max(rec.counter, vr.authenticationInfo.newCounter);
+    await updateCounter(env, rec.credential_id, newCounter);
 
-		await deleteChallenge(env, challengeKey);
-		await updateCredentialCounter(env, credentialRecord.credential_id, verification.authenticationInfo.newCounter);
-
-		const session = await createSession(env, user.id, 'passkey-authentication');
-		const sessionCookie = buildSessionCookie(session.id, session.expires_at);
-
-		logger.info('Passkey authentication successful', {
-			userId: user.id,
-			email: user.email || 'usernameless',
-			credentialId: credential.id,
-		});
-
-		return c.json(
-			{
-				success: true,
-				data: {
-					user: {
-						id: user.id,
-						email: user.email,
-						name: user.name,
-						displayName: user.display_name,
-						createdAt: user.created_at,
-					},
-					sessionId: session.id,
-					expiresAt: new Date(session.expires_at),
-				},
-			},
-			200,
-			{
-				'Set-Cookie': sessionCookie,
-			}
-		);
-	} catch (error) {
-		logger.error('Authentication verification failed', {
-			error: error instanceof Error ? error.message : String(error),
-			credentialId: c.req.valid('json').credential?.id || 'unknown',
-		});
-		return c.json(
-			{
-				success: false,
-				error: 'Authentication verification failed',
-				code: 'INTERNAL_ERROR',
-				details: error instanceof Error ? error.message : 'Unknown error',
-			},
-			500
-		);
-	}
+    const sess = await createSession(env, user.id);
+    return c.json({ success: true, data: { user: { id: user.id, email: user.email, displayName: user.display_name }, sessionId: sess.id, expiresAt: new Date(sess.expires_at) } }, 200, { 'Set-Cookie': cookie(sess.id, sess.expires_at) });
+  } catch (e) { logger.error('auth/verify', e); return c.json({ success: false, error: 'Authentication verification failed', code: 'INTERNAL_ERROR' }, 500); }
 });
 
 export default app;
