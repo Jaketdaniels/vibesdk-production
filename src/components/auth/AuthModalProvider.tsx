@@ -1,6 +1,6 @@
 /**
- * Enhanced Authentication Modal Provider with Passkey-First Authentication
- * Provides global authentication modal management with WebAuthn passkey support
+ * Passkey-Only Authentication Modal Provider
+ * Provides global authentication modal management using WebAuthn passkeys
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
@@ -9,7 +9,7 @@ import { useAuth } from '../../contexts/auth-context';
 import { setGlobalAuthModalTrigger } from '../../lib/api-client';
 
 interface AuthModalContextType {
-  showAuthModal: (context?: string, onSuccess?: () => void, intendedUrl?: string) => void;
+  showAuthModal: (context?: string, onSuccess?: () => void) => void;
   hideAuthModal: () => void;
   isAuthModalOpen: boolean;
 }
@@ -32,22 +32,11 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [modalContext, setModalContext] = useState<string | undefined>();
   const [pendingAction, setPendingAction] = useState<(() => void) | undefined>();
-  const [intendedUrl, setIntendedUrlState] = useState<string | undefined>();
-  const { 
-    login, 
-    loginWithEmail, 
-    loginWithPasskey, 
-    register, 
-    registerPasskey, 
-    error, 
-    clearError, 
-    isAuthenticated 
-  } = useAuth();
+  const { loginWithPasskey, error, clearError, isAuthenticated } = useAuth();
 
-  const showAuthModal = useCallback((context?: string, onSuccess?: () => void, intendedUrl?: string) => {
+  const showAuthModal = useCallback((context?: string, onSuccess?: () => void) => {
     setModalContext(context);
     setPendingAction(onSuccess ? () => onSuccess : undefined);
-    setIntendedUrlState(intendedUrl);
     setIsAuthModalOpen(true);
   }, []);
 
@@ -55,7 +44,6 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
     setIsAuthModalOpen(false);
     setModalContext(undefined);
     setPendingAction(undefined);
-    setIntendedUrlState(undefined);
     clearError();
   }, [clearError]);
 
@@ -63,7 +51,6 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
   useEffect(() => {
     if (isAuthenticated && isAuthModalOpen) {
       hideAuthModal();
-      // Execute the pending action after a brief delay to ensure modal is closed
       if (pendingAction) {
         setTimeout(() => {
           pendingAction();
@@ -72,29 +59,13 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
     }
   }, [isAuthenticated, pendingAction, isAuthModalOpen, hideAuthModal]);
 
-  const handleOAuthLogin = useCallback((provider: 'google' | 'github', redirectUrl?: string) => {
-    // Use the intended URL if available, otherwise use the provided redirect URL
-    const finalRedirectUrl = intendedUrl || redirectUrl;
-    login(provider, finalRedirectUrl);
-  }, [login, intendedUrl]);
-
   const handlePasskeyLogin = useCallback(async () => {
     try {
       await loginWithPasskey();
     } catch (error) {
-      // Error handling is done in the auth context
       console.error('Passkey login failed:', error);
     }
   }, [loginWithPasskey]);
-
-  const handlePasskeyRegister = useCallback(async (email?: string, displayName?: string) => {
-    try {
-      await registerPasskey(email, displayName);
-    } catch (error) {
-      // Error handling is done in the auth context
-      console.error('Passkey registration failed:', error);
-    }
-  }, [registerPasskey]);
 
   // Set up global auth modal trigger for API client
   useEffect(() => {
@@ -113,12 +84,7 @@ export function AuthModalProvider({ children }: AuthModalProviderProps) {
       <LoginModal
         isOpen={isAuthModalOpen}
         onClose={hideAuthModal}
-        onLogin={login} // Fallback for backward compatibility
-        onOAuthLogin={handleOAuthLogin}
-        onEmailLogin={loginWithEmail}
-        onPasskeyLogin={handlePasskeyLogin} // Primary authentication method
-        onRegister={register}
-        onPasskeyRegister={handlePasskeyRegister} // Primary registration method
+        onPasskeyLogin={handlePasskeyLogin}
         error={error}
         onClearError={clearError}
         actionContext={modalContext}
