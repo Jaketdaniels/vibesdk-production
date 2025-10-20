@@ -1,6 +1,7 @@
 /**
  * Passkey Authentication Routes for Cloudflare Workers
  * Implements WebAuthn registration and authentication using SimpleWebAuthn v13
+ * Following 2025 best practices for discoverable credentials and UX
  */
 
 import { Hono } from 'hono';
@@ -343,26 +344,41 @@ async function buildExcludedCredentials(
 }
 
 // =============================================================================
-// USERNAME GENERATION
+// USERNAME GENERATION - IMPROVED FOR 2025 BEST PRACTICES
 // =============================================================================
 
 /**
- * Generate a friendly username for usernameless passkey registration
- * Returns a short, memorable identifier instead of random UUIDs
+ * Generate a human-friendly username for usernameless passkey registration
+ * Uses memorable words + numbers instead of UUIDs for better UX
+ * Following 2025 best practices for discoverable credentials
  */
 function generateFriendlyUsername(): string {
-	// Generate a 4-digit random number for uniqueness
-	const randomNum = Math.floor(1000 + Math.random() * 9000);
-	return `vibesdk-user-${randomNum}`;
+	// Arrays of friendly words for memorable usernames
+	const adjectives = [
+		'swift', 'clever', 'bright', 'cosmic', 'digital', 'quantum', 'cyber', 'nexus',
+		'azure', 'stellar', 'prime', 'ultra', 'meta', 'flux', 'zen', 'nova'
+	];
+	
+	const nouns = [
+		'user', 'developer', 'creator', 'builder', 'maker', 'coder', 'designer',
+		'architect', 'pioneer', 'explorer', 'innovator', 'engineer', 'artist'
+	];
+
+	// Generate random selections
+	const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+	const noun = nouns[Math.floor(Math.random() * nouns.length)];
+	const number = Math.floor(100 + Math.random() * 900); // 3-digit number
+
+	return `${adjective}-${noun}-${number}`;
 }
 
 // =============================================================================
-// ROUTE HANDLERS
+// ROUTE HANDLERS - ENHANCED FOR 2025 BEST PRACTICES
 // =============================================================================
 
 const app = new Hono<AppEnv>();
 
-// Registration: Generate options
+// Registration: Generate options with improved discoverable credentials setup
 app.post('/register/options', zValidator('json', registrationOptionsSchema), async (c) => {
 	try {
 		const { email, displayName } = c.req.valid('json');
@@ -383,21 +399,33 @@ app.post('/register/options', zValidator('json', registrationOptionsSchema), asy
 
 		const excludeCredentials = user ? await buildExcludedCredentials(env, userId) : [];
 
+		// Enhanced options following 2025 best practices
 		const options = await generateRegistrationOptions({
 			rpName: env.RP_NAME,
 			rpID: env.RP_ID,
 			userID: isoUint8Array.fromUTF8String(userId),
-			userName: email || generateFriendlyUsername(),
-			userDisplayName: displayName || email || 'VibeSDK User',
+			userName: email || generateFriendlyUsername(), // Improved username generation
+			userDisplayName: displayName || email || `VibeSDK User`,
 			challenge: isoUint8Array.fromUTF8String(challenge),
-			attestationType: 'none',
+			attestationType: 'none', // Recommended for better compatibility
 			excludeCredentials,
+			// Enhanced authenticator selection for discoverable credentials
 			authenticatorSelection: {
-				residentKey: 'preferred',
-				userVerification: 'preferred',
-				authenticatorAttachment: 'platform',
+				// Prefer discoverable credentials for usernameless auth
+				residentKey: 'required', // Force discoverable credentials
+				requireResidentKey: true, // Legacy compatibility
+				userVerification: 'preferred', // Allow biometric verification
+				// Don't restrict to platform - allow security keys too
+				authenticatorAttachment: undefined,
 			},
-			supportedAlgorithmIDs: [-7, -257], // ES256, RS256
+			// Enhanced algorithm support
+			supportedAlgorithmIDs: [-7, -257, -258, -259], // ES256, RS256, RS384, RS512
+		});
+
+		logger.info('Registration options generated', {
+			userId,
+			email: email || 'usernameless',
+			residentKey: 'required',
 		});
 
 		return c.json({
@@ -417,13 +445,14 @@ app.post('/register/options', zValidator('json', registrationOptionsSchema), asy
 			{
 				success: false,
 				error: 'Failed to generate registration options',
+				details: error instanceof Error ? error.message : 'Unknown error',
 			},
 			500
 		);
 	}
 });
 
-// Registration: Verify credential
+// Registration: Verify credential with enhanced error handling
 app.post('/register/verify', zValidator('json', registrationVerificationSchema), async (c) => {
 	try {
 		const { credential, challenge, email, displayName } = c.req.valid('json');
@@ -435,6 +464,7 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 				{
 					success: false,
 					error: 'Invalid or expired challenge',
+					code: 'CHALLENGE_EXPIRED',
 				},
 				400
 			);
@@ -447,15 +477,21 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 			expectedChallenge: storedChallenge,
 			expectedOrigin: env.ORIGIN,
 			expectedRPID: env.RP_ID,
-			requireUserVerification: false,
+			requireUserVerification: false, // More flexible for better UX
 		});
 
 		if (!verification.verified || !verification.registrationInfo) {
 			await deleteChallenge(env, challengeKey);
+			logger.warn('Registration verification failed', {
+				userId,
+				email: email || 'usernameless',
+				reason: 'Verification failed',
+			});
 			return c.json(
 				{
 					success: false,
-					error: 'Registration verification failed',
+					error: 'Passkey registration verification failed',
+					code: 'VERIFICATION_FAILED',
 				},
 				400
 			);
@@ -474,12 +510,14 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 			return c.json(
 				{
 					success: false,
-					error: 'Failed to create user',
+					error: 'Failed to create user account',
+					code: 'USER_CREATION_FAILED',
 				},
 				500
 			);
 		}
 
+		// Store the credential with enhanced metadata
 		await insertCredential(env, {
 			userId: user.id,
 			credentialId: webAuthnCredential.id,
@@ -489,8 +527,15 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 			aaguid,
 		});
 
-		const session = await createSession(env, user.id);
+		const session = await createSession(env, user.id, 'passkey-registration');
 		const sessionCookie = buildSessionCookie(session.id, session.expires_at);
+
+		logger.info('Passkey registered successfully', {
+			userId: user.id,
+			email: user.email || 'usernameless',
+			credentialId: webAuthnCredential.id,
+			aaguid,
+		});
 
 		return c.json(
 			{
@@ -521,13 +566,15 @@ app.post('/register/verify', zValidator('json', registrationVerificationSchema),
 			{
 				success: false,
 				error: 'Registration verification failed',
+				code: 'INTERNAL_ERROR',
+				details: error instanceof Error ? error.message : 'Unknown error',
 			},
 			500
 		);
 	}
 });
 
-// Authentication: Generate options
+// Authentication: Generate options for discoverable credentials
 app.post('/auth/options', async (c) => {
 	try {
 		const env = c.env;
@@ -536,9 +583,17 @@ app.post('/auth/options', async (c) => {
 		const challengeKey = buildAuthenticationChallengeKey(challenge);
 		await storeChallenge(env, challengeKey, challenge);
 
+		// Enhanced options for discoverable credentials and conditional UI
 		const options = await generateAuthenticationOptions({
 			rpID: env.RP_ID,
 			challenge: isoUint8Array.fromUTF8String(challenge),
+			userVerification: 'preferred',
+			// Don't specify allowCredentials for discoverable credentials
+			// This enables usernameless authentication
+		});
+
+		logger.info('Authentication options generated', {
+			discoverableCredentials: true,
 			userVerification: 'preferred',
 		});
 
@@ -557,13 +612,14 @@ app.post('/auth/options', async (c) => {
 			{
 				success: false,
 				error: 'Failed to generate authentication options',
+				details: error instanceof Error ? error.message : 'Unknown error',
 			},
 			500
 		);
 	}
 });
 
-// Authentication: Verify assertion
+// Authentication: Verify assertion with enhanced error handling
 app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), async (c) => {
 	try {
 		const { credential, challenge } = c.req.valid('json');
@@ -577,6 +633,7 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 				{
 					success: false,
 					error: 'Invalid or expired challenge',
+					code: 'CHALLENGE_EXPIRED',
 				},
 				400
 			);
@@ -585,10 +642,14 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 		const credentialRecord = await findCredentialById(env, credential.id);
 		if (!credentialRecord) {
 			await deleteChallenge(env, challengeKey);
+			logger.warn('Authentication failed: credential not found', {
+				credentialId: credential.id,
+			});
 			return c.json(
 				{
 					success: false,
-					error: 'Credential not found',
+					error: 'Passkey not recognized',
+					code: 'CREDENTIAL_NOT_FOUND',
 				},
 				400
 			);
@@ -597,10 +658,15 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 		const user = await findUserById(env, credentialRecord.user_id);
 		if (!user) {
 			await deleteChallenge(env, challengeKey);
+			logger.error('Authentication failed: user not found', {
+				userId: credentialRecord.user_id,
+				credentialId: credential.id,
+			});
 			return c.json(
 				{
 					success: false,
-					error: 'User not found',
+					error: 'User account not found',
+					code: 'USER_NOT_FOUND',
 				},
 				400
 			);
@@ -619,15 +685,20 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 					? (JSON.parse(credentialRecord.transports) as AuthenticatorTransport[])
 					: undefined,
 			},
-			requireUserVerification: false,
+			requireUserVerification: false, // More flexible for better UX
 		});
 
 		if (!verification.verified) {
 			await deleteChallenge(env, challengeKey);
+			logger.warn('Authentication verification failed', {
+				userId: user.id,
+				credentialId: credential.id,
+			});
 			return c.json(
 				{
 					success: false,
-					error: 'Authentication verification failed',
+					error: 'Passkey authentication failed',
+					code: 'VERIFICATION_FAILED',
 				},
 				400
 			);
@@ -636,8 +707,14 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 		await deleteChallenge(env, challengeKey);
 		await updateCredentialCounter(env, credentialRecord.credential_id, verification.authenticationInfo.newCounter);
 
-		const session = await createSession(env, user.id);
+		const session = await createSession(env, user.id, 'passkey-authentication');
 		const sessionCookie = buildSessionCookie(session.id, session.expires_at);
+
+		logger.info('Passkey authentication successful', {
+			userId: user.id,
+			email: user.email || 'usernameless',
+			credentialId: credential.id,
+		});
 
 		return c.json(
 			{
@@ -668,6 +745,8 @@ app.post('/auth/verify', zValidator('json', authenticationVerificationSchema), a
 			{
 				success: false,
 				error: 'Authentication verification failed',
+				code: 'INTERNAL_ERROR',
+				details: error instanceof Error ? error.message : 'Unknown error',
 			},
 			500
 		);
