@@ -19,6 +19,10 @@ declare global {
 			OPENAI_API_KEY?: string;
 			SERPAPI_KEY?: string;
 
+			// OpenRouter Configuration
+			OPENROUTER_SITE_URL?: string;
+			OPENROUTER_SITE_NAME?: string;
+
 			// Sandbox Service (override literal types from wrangler.jsonc)
 			SANDBOX_SERVICE_URL?: string;
 			SANDBOX_SERVICE_API_KEY?: string;

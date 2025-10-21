@@ -268,9 +268,20 @@ export async function getConfigurationForModel(
         const provider = match[1];
         if (provider === 'openrouter') {
             const apiKey = await getApiKey('openrouter', env, userId);
+            const defaultHeaders: Record<string, string> = {};
+
+            if (env.OPENROUTER_SITE_URL) {
+                defaultHeaders['HTTP-Referer'] = env.OPENROUTER_SITE_URL;
+            }
+
+            if (env.OPENROUTER_SITE_NAME) {
+                defaultHeaders['X-Title'] = env.OPENROUTER_SITE_NAME;
+            }
+
             return {
                 baseURL: 'https://openrouter.ai/api/v1',
                 apiKey: apiKey,
+                defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
             };
         } else if (provider === 'ollama') {
             const endpoint = await getApiKey('ollama', env, userId);
@@ -292,10 +303,36 @@ export async function getConfigurationForModel(
         providerForcedOverride = provider as AIGatewayProviders;
     }
 
-    const baseURL = await buildGatewayUrl(env, providerForcedOverride);
-
     // Extract the provider name from model name. Model name is of type `provider/model_name`
     const provider = providerForcedOverride || model.split('/')[0];
+
+    // Handle regular openrouter models (openrouter/provider/model) with BYOK
+    if (provider === 'openrouter' && !providerForcedOverride) {
+        const apiKey = await getApiKey('openrouter', env, userId);
+
+        // Only route directly to OpenRouter if user has a BYOK key
+        // Check if key is valid and not the default gateway token
+        if (isValidApiKey(apiKey) && apiKey !== env.CLOUDFLARE_AI_GATEWAY_TOKEN) {
+            const defaultHeaders: Record<string, string> = {};
+
+            if (env.OPENROUTER_SITE_URL) {
+                defaultHeaders['HTTP-Referer'] = env.OPENROUTER_SITE_URL;
+            }
+
+            if (env.OPENROUTER_SITE_NAME) {
+                defaultHeaders['X-Title'] = env.OPENROUTER_SITE_NAME;
+            }
+
+            return {
+                baseURL: 'https://openrouter.ai/api/v1',
+                apiKey: apiKey,
+                defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
+            };
+        }
+    }
+
+    const baseURL = await buildGatewayUrl(env, providerForcedOverride);
+
     // Try to find API key of type <PROVIDER>_API_KEY else default to CLOUDFLARE_AI_GATEWAY_TOKEN
     // `env` is an interface of type `Env`
     const apiKey = await getApiKey(provider, env, userId);
