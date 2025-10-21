@@ -38,15 +38,13 @@ export enum AIModels {
     OPENAI_OSS = 'openai/gpt-oss-120b',
 
     // OpenRouter - Router to 200+ models from multiple providers
-    OPENROUTER_ANTHROPIC_CLAUDE_35_SONNET = 'openrouter/anthropic/claude-3.5-sonnet',
-    OPENROUTER_ANTHROPIC_CLAUDE_37_SONNET = 'openrouter/anthropic/claude-3-7-sonnet-20250219',
-    OPENROUTER_OPENAI_GPT4O = 'openrouter/openai/gpt-4o',
-    OPENROUTER_OPENAI_O1 = 'openrouter/openai/o1',
-    OPENROUTER_GOOGLE_GEMINI_2_FLASH = 'openrouter/google/gemini-2.0-flash-exp',
-    OPENROUTER_META_LLAMA_33_70B = 'openrouter/meta-llama/llama-3.3-70b-instruct',
-    OPENROUTER_QWEN_3_CODER = 'openrouter/qwen/qwq-32b-preview',
-    OPENROUTER_DEEPSEEK_V3 = 'openrouter/deepseek/deepseek-chat',
-    OPENROUTER_MISTRAL_LARGE = 'openrouter/mistralai/mistral-large-2411',
+    OPENROUTER_Z_AI_GLM_4_6 = 'openrouter/z-ai/glm-4.6',
+    OPENROUTER_ANTHROPIC_CLAUDE_SONNET_4_5 = 'openrouter/anthropic/claude-sonnet-4.5',
+    OPENROUTER_X_AI_GROK_4_FAST = 'openrouter/x-ai/grok-4-fast',
+    OPENROUTER_DEEPSEEK_V3_1_TERMINUS = 'openrouter/deepseek/deepseek-v3.1-terminus',
+    OPENROUTER_DEEPCOGITO_COGITO_V2_PREVIEW_LLAMA_405B = 'openrouter/deepcogito/cogito-v2-preview-llama-405b',
+    OPENROUTER_QWEN_QWEN3_VL_8B_INSTRUCT = 'openrouter/qwen/qwen3-vl-8b-instruct',
+    OPENROUTER_OPENAI_GPT_OSS_20B_FREE = 'openrouter/openai/gpt-oss-20b:free',
 
     // Cerebras models
     CEREBRAS_GPT_OSS = 'cerebras/gpt-oss-120b',
