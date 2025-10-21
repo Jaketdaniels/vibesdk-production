@@ -63,6 +63,8 @@ import AnthropicLogo from '@/assets/provider-logos/anthropic.svg?react';
 import GoogleLogo from '@/assets/provider-logos/google.svg?react';
 import CerebrasLogo from '@/assets/provider-logos/cerebras.svg?react';
 import CloudflareLogo from '@/assets/provider-logos/cloudflare.svg?react';
+import OpenRouterLogo from '@/assets/provider-logos/openrouter.svg?react';
+import OllamaLogo from '@/assets/provider-logos/ollama.svg?react';
 
 export default function SettingsPage() {
 	const { user, isLoading } = useAuth();
@@ -119,9 +121,11 @@ export default function SettingsPage() {
 	const [byokModalOpen, setByokModalOpen] = useState(false);
 
 	// Handle BYOK key added/removed - refresh both secrets and model configs
-	const handleByokKeyAdded = () => {
-		loadUserSecrets();
-		loadModelConfigs(); // Refresh model configs since BYOK provider availability changed
+	const handleByokKeyAdded = async () => {
+		// Load secrets first to update BYOK provider status
+		await loadUserSecrets();
+		// Then reload model configs with updated provider availability
+		await loadModelConfigs();
 	};
 
 	// const handleSaveProfile = async () => {
@@ -459,6 +463,8 @@ export default function SettingsPage() {
 		google: GoogleLogo,
 		cerebras: CerebrasLogo,
 		cloudflare: CloudflareLogo,
+		openrouter: OpenRouterLogo,
+		ollama: OllamaLogo,
 	};
 
 	const getProviderLogo = (
@@ -476,6 +482,8 @@ export default function SettingsPage() {
 			github: '🐙',
 			vercel: '▲',
 			supabase: '🗄️',
+			openrouter: '🔀',
+			ollama: '🦙',
 			custom: '🔑',
 		};
 
@@ -508,7 +516,8 @@ export default function SettingsPage() {
 		if (!isLoading && user) {
 			loadActiveSessions();
 			loadModelConfigs();
-            loadSecretTemplates();
+			loadSecretTemplates();
+			loadUserSecrets(); // Load BYOK keys to display them in settings
 		}
 	}, [user, isLoading]);
 
