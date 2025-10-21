@@ -83,6 +83,7 @@
 		"date-fns": "^4.1.0",
 		"diff": "^8.0.2",
 		"drizzle-orm": "^0.44.5",
+		"focus-trap-react": "^11.0.4",
 		"framer-motion": "^12.23.22",
 		"hono": "^4.9.9",
 		"html2canvas-pro": "^1.5.11",

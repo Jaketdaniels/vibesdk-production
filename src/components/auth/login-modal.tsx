@@ -4,10 +4,11 @@
  * - If credential not found: inline CTA to Create a passkey (registration requires email)
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertCircle, KeyRound, Fingerprint, Mail } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import FocusTrap from 'focus-trap-react';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -36,6 +37,31 @@ export function LoginModal({
   const [registrationStep, setRegistrationStep] = useState<'email' | 'otp' | 'passkey'>('email');
   const [otp, setOtp] = useState('');
   const [otpMessage, setOtpMessage] = useState('');
+  const previouslyFocusedElement = useRef<HTMLElement | null>(null);
+
+  // Store previously focused element and handle Escape key
+  useEffect(() => {
+    if (isOpen) {
+      previouslyFocusedElement.current = document.activeElement as HTMLElement;
+
+      const handleEscape = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          handleClose();
+        }
+      };
+
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [isOpen]);
+
+  // Return focus to previously focused element on close
+  useEffect(() => {
+    if (!isOpen && previouslyFocusedElement.current) {
+      previouslyFocusedElement.current.focus();
+      previouslyFocusedElement.current = null;
+    }
+  }, [isOpen]);
 
   const isValidEmail = (emailValue: string): boolean => {
     const normalized = emailValue.trim().toLowerCase();
@@ -161,23 +187,32 @@ export function LoginModal({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="modal-title">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 backdrop-blur-sm"
             onClick={handleClose}
+            aria-hidden="true"
           />
 
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ type: 'spring', duration: 0.4, bounce: 0.3 }}
-            className="relative z-10 w-full max-w-md"
+          <FocusTrap
+            active={isOpen}
+            focusTrapOptions={{
+              initialFocus: false,
+              allowOutsideClick: true,
+              returnFocusOnDeactivate: false,
+            }}
           >
-            <div className="bg-bg-3/95 backdrop-blur-xl text-text-primary border border-border-primary/50 rounded-2xl shadow-2xl overflow-hidden">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: 'spring', duration: 0.4, bounce: 0.3 }}
+              className="relative z-10 w-full max-w-md"
+            >
+              <div className="bg-bg-3/95 backdrop-blur-xl text-text-primary border border-border-primary/50 rounded-2xl shadow-2xl overflow-hidden">
               <div className="relative p-8 pb-6">
                 {showCloseButton && (
                   <button
@@ -190,7 +225,7 @@ export function LoginModal({
                 )}
 
                 <div className="text-center space-y-3">
-                  <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-4" aria-hidden="true">
                     {showRegister ? (
                       registrationStep === 'email' ? (
                         <Mail className="w-7 h-7 text-primary" />
@@ -203,7 +238,7 @@ export function LoginModal({
                       <Fingerprint className="w-7 h-7 text-primary" />
                     )}
                   </div>
-                  <h2 className="text-2xl font-semibold">
+                  <h2 id="modal-title" className="text-2xl font-semibold">
                     {actionContext
                       ? `Sign in ${actionContext}`
                       : showRegister
@@ -256,14 +291,19 @@ export function LoginModal({
                   registrationStep === 'email' ? (
                     <form onSubmit={handleSendOTP} className="space-y-4">
                       <div>
+                        <label htmlFor="email-input" className="sr-only">Email address</label>
                         <input
+                          id="email-input"
                           type="email"
                           placeholder="Email address"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
+                          autoComplete="email"
                           className="w-full p-3 rounded-lg border border-border-primary bg-bg-2/50 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
                           disabled={isLoading}
                           required
+                          aria-required="true"
+                          aria-invalid={email && !isValidEmail(email) ? 'true' : 'false'}
                         />
                       </div>
 
@@ -272,9 +312,10 @@ export function LoginModal({
                         whileTap={{ scale: 0.98 }}
                         disabled={isLoading || !isValidEmail(email)}
                         className="w-full group relative overflow-hidden rounded-xl bg-primary p-4 text-primary-foreground transition-all hover:bg-primary/90 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
+                        aria-busy={isLoading}
                       >
                         <div className="relative z-10 flex items-center justify-center gap-3">
-                          <Mail className="h-5 w-5" />
+                          <Mail className={`h-5 w-5 ${isLoading ? 'animate-pulse' : ''}`} />
                           <span className="font-medium">
                             {isLoading ? 'Sending Code...' : 'Send Verification Code'}
                           </span>
@@ -294,7 +335,9 @@ export function LoginModal({
                   ) : registrationStep === 'otp' ? (
                     <form onSubmit={handleVerifyOTP} className="space-y-4">
                       <div>
+                        <label htmlFor="otp-input" className="sr-only">6-digit verification code</label>
                         <input
+                          id="otp-input"
                           type="text"
                           placeholder="______"
                           value={otp}
@@ -302,9 +345,12 @@ export function LoginModal({
                           maxLength={6}
                           pattern="\d{6}"
                           inputMode="numeric"
+                          autoComplete="one-time-code"
                           className="w-full p-3 rounded-lg border border-border-primary bg-bg-2/50 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-2xl text-center tracking-widest font-mono"
                           disabled={isLoading}
                           required
+                          aria-required="true"
+                          aria-invalid={otp && otp.length !== 6 ? 'true' : 'false'}
                         />
                       </div>
 
@@ -313,9 +359,10 @@ export function LoginModal({
                         whileTap={{ scale: 0.98 }}
                         disabled={isLoading || otp.length !== 6}
                         className="w-full group relative overflow-hidden rounded-xl bg-primary p-4 text-primary-foreground transition-all hover:bg-primary/90 border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/20"
+                        aria-busy={isLoading}
                       >
                         <div className="relative z-10 flex items-center justify-center gap-3">
-                          <KeyRound className="h-5 w-5" />
+                          <KeyRound className={`h-5 w-5 ${isLoading ? 'animate-pulse' : ''}`} />
                           <span className="font-medium">
                             {isLoading ? 'Verifying...' : 'Verify Code'}
                           </span>
@@ -400,6 +447,7 @@ export function LoginModal({
               </div>
             </div>
           </motion.div>
+        </FocusTrap>
         </div>
       )}
     </AnimatePresence>,
